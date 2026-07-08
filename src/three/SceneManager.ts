@@ -7,7 +7,7 @@ import { isArm } from '../model/types'
 import { computePose, shapeWeightOz } from '../model/balance'
 import type { Pose } from '../model/balance'
 import { WIRES } from '../model/materials'
-import { holePos, outline, shapeArea } from '../model/shapes'
+import { centroid, holePos, outline, shapeArea } from '../model/shapes'
 import { FLOOR_Y, buildRoom } from './room'
 import type { Room } from './room'
 
@@ -20,6 +20,9 @@ interface NodeVisual {
   group: THREE.Group
   body?: CANNON.Body
   meshes: THREE.Mesh[]
+  /** shapes only: true center of gravity in the group's local frame — the
+   *  physics body origin sits here rather than at the bounding-box center */
+  com?: { x: number; y: number }
 }
 
 export class SceneManager {
@@ -43,6 +46,7 @@ export class SceneManager {
   private hangerBody: CANNON.Body | null = null
   private mobileRoot = new THREE.Group()
   private room: Room
+  private shadowCatcher!: THREE.Mesh
   private disposables: { dispose(): void }[] = []
 
   private world: CANNON.World | null = null
@@ -105,6 +109,18 @@ export class SceneManager {
     this.room = buildRoom()
     this.scene.add(this.room.group)
 
+    // invisible shadow catcher for when the room is hidden, so the mobile
+    // still grounds itself with a soft shadow in the blank space
+    this.shadowCatcher = new THREE.Mesh(
+      new THREE.PlaneGeometry(400, 400),
+      new THREE.ShadowMaterial({ opacity: 0.16 }),
+    )
+    this.shadowCatcher.rotation.x = -Math.PI / 2
+    this.shadowCatcher.position.y = FLOOR_Y
+    this.shadowCatcher.receiveShadow = true
+    this.shadowCatcher.visible = false
+    this.scene.add(this.shadowCatcher)
+
     this.scene.add(this.mobileRoot)
 
     this.resizeObs = new ResizeObserver(() => this.resize())
@@ -135,6 +151,11 @@ export class SceneManager {
 
   setBreeze(b: number): void {
     this.breeze = b
+  }
+
+  setRoomVisible(v: boolean): void {
+    this.room.group.visible = v
+    this.shadowCatcher.visible = !v
   }
 
   setSelected(id: string | null): void {
@@ -331,13 +352,20 @@ export class SceneManager {
     const vis: NodeVisual = { node, group, meshes: [mesh] }
 
     if (this.world) {
+      const c = centroid(node.shape, node.width, node.height)
       const body = new CANNON.Body({ mass: Math.max(shapeWeightOz(node), 0.05) })
-      body.addShape(new CANNON.Box(new CANNON.Vec3(node.width / 2, node.height / 2, Math.max(node.thickness / 2, 0.05))))
+      // body origin = true centroid; the collision box is offset so the mass
+      // hangs where the real cut piece's mass hangs
+      body.addShape(
+        new CANNON.Box(new CANNON.Vec3(node.width / 2, node.height / 2, Math.max(node.thickness / 2, 0.05))),
+        new CANNON.Vec3(-c.x, -c.y, 0),
+      )
       body.linearDamping = 0.2
       body.angularDamping = 0.3
       body.collisionFilterMask = 0
       this.world.addBody(body)
       vis.body = body
+      vis.com = c
     }
     this.visuals.set(node.id, vis)
   }
@@ -353,8 +381,10 @@ export class SceneManager {
       node.kind === 'arm'
         ? new CANNON.Vec3(node.pivot - node.length / 2, node.pivotHeight, 0)
         : (() => {
+            // shape body origin sits at the centroid, so express the hole there
             const hole = holePos(node.shape, node.width, node.height)
-            return new CANNON.Vec3(hole.x, hole.y, 0)
+            const c = centroid(node.shape, node.width, node.height)
+            return new CANNON.Vec3(hole.x - c.x, hole.y - c.y, 0)
           })()
 
     let parentBody: CANNON.Body | null
@@ -409,7 +439,9 @@ export class SceneManager {
       vis.group.position.copy(pos)
       vis.group.quaternion.copy(q)
       if (vis.body) {
-        vis.body.position.set(pos.x, pos.y, pos.z)
+        // shape bodies live at the centroid, offset from the group origin
+        const bodyPos = vis.com ? pos.clone().add(new THREE.Vector3(vis.com.x, vis.com.y, 0).applyQuaternion(q)) : pos
+        vis.body.position.set(bodyPos.x, bodyPos.y, bodyPos.z)
         vis.body.quaternion.set(q.x, q.y, q.z, q.w)
         vis.body.velocity.setZero()
         vis.body.angularVelocity.setZero()
@@ -561,8 +593,15 @@ export class SceneManager {
       this.world.step(1 / 120, dt, 10)
       for (const vis of this.visuals.values()) {
         if (!vis.body) continue
-        vis.group.position.set(vis.body.position.x, vis.body.position.y, vis.body.position.z)
-        vis.group.quaternion.set(vis.body.quaternion.x, vis.body.quaternion.y, vis.body.quaternion.z, vis.body.quaternion.w)
+        const b = vis.body
+        vis.group.quaternion.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w)
+        if (vis.com) {
+          // body origin is the centroid; shift back to the group's bbox-center origin
+          const off = b.quaternion.vmult(new CANNON.Vec3(-vis.com.x, -vis.com.y, 0))
+          vis.group.position.set(b.position.x + off.x, b.position.y + off.y, b.position.z + off.z)
+        } else {
+          vis.group.position.set(b.position.x, b.position.y, b.position.z)
+        }
       }
       if (this.hangerBody && this.hangerGroup) {
         const b = this.hangerBody

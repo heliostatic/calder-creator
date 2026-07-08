@@ -16,6 +16,8 @@ interface Store {
   view: View
   /** 0..1 breeze strength for test mode */
   breeze: number
+  /** show the 20'×20' room backdrop, or a blank space */
+  showRoom: boolean
   templatesOpen: boolean
   past: MobileDoc[]
   future: MobileDoc[]
@@ -30,7 +32,11 @@ interface Store {
   setMode: (m: Mode) => void
   setView: (v: View) => void
   setBreeze: (b: number) => void
+  setShowRoom: (v: boolean) => void
   setTemplatesOpen: (open: boolean) => void
+  /** bulk material editing across the whole mobile */
+  setAllShapes: (patch: Partial<Pick<ShapeNode, 'wood' | 'thickness'>>) => void
+  setAllWire: (wire: ArmNode['wire']) => void
   loadTemplate: (key: string) => void
   undo: () => void
   redo: () => void
@@ -65,6 +71,7 @@ export const useStore = create<Store>((set, get) => {
     mode: 'build',
     view: 'editor',
     breeze: 0.35,
+    showRoom: true,
     templatesOpen: false,
     past: [],
     future: [],
@@ -141,7 +148,20 @@ export const useStore = create<Store>((set, get) => {
     setMode: (mode) => set({ mode }),
     setView: (view) => set({ view }),
     setBreeze: (breeze) => set({ breeze }),
+    setShowRoom: (showRoom) => set({ showRoom }),
     setTemplatesOpen: (templatesOpen) => set({ templatesOpen }),
+
+    setAllShapes: (patch) => {
+      const doc = get().doc
+      const root = mapTree(doc.root, (n) => (n.kind === 'shape' ? { ...n, ...patch } : n))
+      commit(rebalance({ ...doc, root }))
+    },
+
+    setAllWire: (wire) => {
+      const doc = get().doc
+      const root = mapTree(doc.root, (n) => (n.kind === 'arm' ? { ...n, wire } : n))
+      commit(rebalance({ ...doc, root }))
+    },
 
     loadTemplate: (key) => {
       const entry = TEMPLATES.find((t) => t.key === key)

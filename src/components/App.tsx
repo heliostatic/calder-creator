@@ -24,6 +24,8 @@ function EditorView() {
   const past = useStore((s) => s.past)
   const future = useStore((s) => s.future)
   const setTemplatesOpen = useStore((s) => s.setTemplatesOpen)
+  const showRoom = useStore((s) => s.showRoom)
+  const setShowRoom = useStore((s) => s.setShowRoom)
   const doc = useStore((s) => s.doc)
   const setDoc = useStore((s) => s.setDoc)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -92,7 +94,13 @@ function EditorView() {
         </aside>
         <div className="canvas-pane">
           <Canvas3D />
-          <span className="room-caption">Room: 20′ × 20′ · 9′ ceiling · Eames chair &amp; Noguchi table at true size</span>
+          <label className="room-toggle">
+            <input type="checkbox" checked={showRoom} onChange={(e) => setShowRoom(e.target.checked)} />
+            Show room
+          </label>
+          {showRoom && (
+            <span className="room-caption">Room: 20′ × 20′ · 9′ ceiling · Eames chair &amp; Noguchi table at true size</span>
+          )}
           <div className="mode-overlay">
             <div className="mode-toggle">
               <button className={mode === 'build' ? 'on' : ''} onClick={() => setMode('build')}>

@@ -1,5 +1,5 @@
 import type { ArmNode, ShapeKind, ShapeNode, WireKey, WoodKey } from '../model/types'
-import { findNode, labelNodes } from '../model/types'
+import { findNode, labelNodes, walk } from '../model/types'
 import { useStore } from '../state/store'
 import { COLORS, THICKNESSES, WIRES, WOODS, fmtIn, fmtOz } from '../model/materials'
 import { armLoads, armTiltRad, balancedPivot, shapeWeightOz, subtreeWeightOz } from '../model/balance'
@@ -57,7 +57,25 @@ function MobileSettings() {
   const doc = useStore((s) => s.doc)
   const updateDoc = useStore((s) => s.updateDoc)
   const balanceNow = useStore((s) => s.balanceNow)
+  const setAllShapes = useStore((s) => s.setAllShapes)
+  const setAllWire = useStore((s) => s.setAllWire)
   const totalOz = subtreeWeightOz(doc.root)
+
+  // shared values across parts, or '' when they differ
+  const woods = new Set<string>()
+  const thicknesses = new Set<number>()
+  const wires = new Set<string>()
+  walk(doc.root, (n) => {
+    if (n.kind === 'shape') {
+      woods.add(n.wood)
+      thicknesses.add(n.thickness)
+    } else {
+      wires.add(n.wire)
+    }
+  })
+  const commonWood = woods.size === 1 ? [...woods][0] : ''
+  const commonThickness = thicknesses.size === 1 ? String([...thicknesses][0]) : ''
+  const commonWire = wires.size === 1 ? [...wires][0] : ''
 
   return (
     <div className="inspector">
@@ -92,6 +110,47 @@ function MobileSettings() {
           ⚖️ Balance everything now
         </button>
       )}
+
+      <div className="bulk-box">
+        <h3>Materials for the whole mobile</h3>
+        <p className="hint">Change every part at once. Pick a single part instead to change just that one.</p>
+        <Field label="All shapes — wood">
+          <select value={commonWood} onChange={(e) => e.target.value && setAllShapes({ wood: e.target.value as WoodKey })}>
+            {commonWood === '' && <option value="">Mixed woods…</option>}
+            {Object.entries(WOODS).map(([k, w]) => (
+              <option key={k} value={k}>
+                {w.label} — {w.note}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="All shapes — thickness">
+          <select
+            value={commonThickness}
+            onChange={(e) => e.target.value && setAllShapes({ thickness: Number(e.target.value) })}
+          >
+            {commonThickness === '' && <option value="">Mixed thicknesses…</option>}
+            {THICKNESSES.map((t) => (
+              <option key={t.value} value={String(t.value)}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {wires.size > 0 && (
+          <Field label="All arms — wire">
+            <select value={commonWire} onChange={(e) => e.target.value && setAllWire(e.target.value as WireKey)}>
+              {commonWire === '' && <option value="">Mixed wires…</option>}
+              {Object.entries(WIRES).map(([k, w]) => (
+                <option key={k} value={k}>
+                  {w.label} — {w.note}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+      </div>
+
       <div className="stat-box">
         <div>
           Total weight: <strong>{fmtOz(totalOz)}</strong>

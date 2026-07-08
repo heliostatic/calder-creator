@@ -9,6 +9,7 @@ export function Canvas3D() {
   const doc = useStore((s) => s.doc)
   const mode = useStore((s) => s.mode)
   const breeze = useStore((s) => s.breeze)
+  const showRoom = useStore((s) => s.showRoom)
   const selectedId = useStore((s) => s.selectedId)
   const select = useStore((s) => s.select)
 
@@ -33,6 +34,9 @@ export function Canvas3D() {
   useEffect(() => {
     manager.current?.setBreeze(breeze)
   }, [breeze])
+  useEffect(() => {
+    manager.current?.setRoomVisible(showRoom)
+  }, [showRoom])
   useEffect(() => {
     manager.current?.setSelected(selectedId)
   }, [selectedId])

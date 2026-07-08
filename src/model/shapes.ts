@@ -197,32 +197,36 @@ function distToOutline(pts: Pt[], x: number, y: number): number {
 
 const holeCache = new Map<string, Pt>()
 
-/** Where the hanging hole gets drilled: as high on the shape as possible while
- *  keeping a safe ring of material around the hole. Scans down from the top of
- *  the shape until a spot with enough clearance exists — this keeps the hole
- *  inside thin shapes like the crescent, whose top tip has almost no material. */
+/** Where the hanging hole gets drilled: the highest spot that (a) keeps a safe
+ *  ring of material around the hole and (b) sits directly above the shape's
+ *  center of gravity — a shape suspended from a hole rotates until its centroid
+ *  hangs below it, so this makes every shape hang the way it was designed.
+ *  The vertical-line requirement is relaxed step by step for shapes (like a
+ *  thin crescent) with no material straight above their centroid. */
 export function holePos(kind: ShapeKind, w: number, h: number): Pt {
   const key = `${kind}|${w}|${h}`
   const hit = holeCache.get(key)
   if (hit) return hit
   const pts = outline(kind, w, h)
-  let top = pts[0]
-  for (const p of pts) if (p.y > top.y) top = p
+  const c = centroid(kind, w, h)
   const clearance = Math.min(HOLE_INSET_IN * 0.65, w * 0.13, h * 0.13)
+  const yStep = Math.max(h / 60, 0.03)
+  const xStep = Math.max(w / 80, 0.025)
 
   let result: Pt | null = null
-  const yStep = Math.max(h / 60, 0.03)
-  const xStep = Math.max(w / 60, 0.03)
-  for (let y = h / 2 - clearance; y > -h / 2 && !result; y -= yStep) {
-    let bestX: number | null = null
-    for (let x = -w / 2 + clearance; x <= w / 2 - clearance; x += xStep) {
-      if (!pointInPolygon(pts, x, y)) continue
-      if (distToOutline(pts, x, y) < clearance) continue
-      if (bestX === null || Math.abs(x - top.x) < Math.abs(bestX - top.x)) bestX = x
+  for (const tol of [w / 14, w / 6, w]) {
+    for (let y = h / 2 - clearance; y > c.y && !result; y -= yStep) {
+      let bestX: number | null = null
+      for (let x = Math.max(c.x - tol, -w / 2 + clearance); x <= Math.min(c.x + tol, w / 2 - clearance); x += xStep) {
+        if (!pointInPolygon(pts, x, y)) continue
+        if (distToOutline(pts, x, y) < clearance) continue
+        if (bestX === null || Math.abs(x - c.x) < Math.abs(bestX - c.x)) bestX = x
+      }
+      if (bestX !== null) result = { x: bestX, y }
     }
-    if (bestX !== null) result = { x: bestX, y }
+    if (result) break
   }
-  const pos = result ?? centroid(kind, w, h)
+  const pos = result ?? c
   holeCache.set(key, pos)
   return pos
 }
