@@ -95,41 +95,51 @@ function EditorView() {
         </aside>
         <div className="canvas-pane">
           <Canvas3D />
-          <div className="view-controls">
-            <label className="room-toggle">
-              <input type="checkbox" checked={showRoom} onChange={(e) => setShowRoom(e.target.checked)} />
-              Show room
-            </label>
-            <div className="zoom-presets">
-              <button className="btn small" onClick={() => zoomTo('room')}>
-                🏠 Whole room
-              </button>
-              <button className="btn small" onClick={() => zoomTo('mobile')}>
+
+          {/* top bar: mode (with breeze in test mode) + one pill for the view */}
+          <div className="canvas-topbar">
+            <div className="mode-col">
+              <div className="mode-toggle">
+                <button className={mode === 'build' ? 'on' : ''} onClick={() => setMode('build')}>
+                  🔧 Workbench
+                </button>
+                <button className={mode === 'test' ? 'on' : ''} onClick={() => setMode('test')}>
+                  🍃 Wind test
+                </button>
+              </div>
+              {mode === 'test' && (
+                <label className="breeze">
+                  Breeze
+                  <input type="range" min={0} max={1} step={0.05} value={breeze} onChange={(e) => setBreeze(Number(e.target.value))} />
+                </label>
+              )}
+            </div>
+            <div className="view-pill">
+              <button onClick={() => zoomTo('mobile')} title="Zoom in on the mobile">
                 🔍 Mobile
+              </button>
+              <button onClick={() => zoomTo('room')} title="See the whole room">
+                ⛶ Room
+              </button>
+              <span className="view-pill-divider" />
+              <button
+                className={showRoom ? 'on' : ''}
+                onClick={() => setShowRoom(!showRoom)}
+                title={showRoom ? 'Hide the room — blank space' : 'Show the 20′×20′ room'}
+              >
+                🏠
               </button>
             </div>
           </div>
-          {showRoom && (
-            <span className="room-caption">Room: 20′ × 20′ · 9′ ceiling · Eames chair &amp; Noguchi table at true size</span>
-          )}
-          <div className="mode-overlay">
-            <div className="mode-toggle">
-              <button className={mode === 'build' ? 'on' : ''} onClick={() => setMode('build')}>
-                🔧 Workbench
-              </button>
-              <button className={mode === 'test' ? 'on' : ''} onClick={() => setMode('test')}>
-                🍃 Wind test
-              </button>
-            </div>
-            {mode === 'test' ? (
-              <label className="breeze">
-                Breeze
-                <input type="range" min={0} max={1} step={0.05} value={breeze} onChange={(e) => setBreeze(Number(e.target.value))} />
-              </label>
-            ) : (
-              <span className="canvas-hint">Drag with the mouse to look around · scroll to zoom · click a piece to edit it</span>
-            )}
-            {mode === 'test' && <span className="canvas-hint">Grab any piece with the mouse and give it a push</span>}
+
+          {/* bottom bar: scale reference and quiet guidance */}
+          <div className="canvas-bottombar">
+            {showRoom ? <span className="room-caption">20′ × 20′ room · 9′ ceiling · furniture true to size</span> : <span />}
+            <span className="canvas-hint">
+              {mode === 'build'
+                ? 'Drag to look around · scroll to zoom · click a piece to edit it'
+                : 'Grab any piece with the mouse and give it a push'}
+            </span>
           </div>
         </div>
       </div>

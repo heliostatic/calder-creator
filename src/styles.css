@@ -149,20 +149,41 @@ body {
   display: block;
 }
 
-.mode-overlay {
+.canvas-topbar {
   position: absolute;
   top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.canvas-topbar > * {
+  pointer-events: auto;
+}
+
+.mode-col {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  pointer-events: none;
 }
 
-.mode-overlay > * {
-  pointer-events: auto;
+.canvas-bottombar {
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  pointer-events: none;
 }
 
 .mode-toggle {
@@ -201,47 +222,48 @@ body {
 }
 
 .canvas-hint {
-  background: rgba(255, 253, 248, 0.85);
+  background: rgba(255, 253, 248, 0.82);
   border-radius: 8px;
   padding: 4px 12px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: var(--muted);
 }
 
-.view-controls {
-  position: absolute;
-  top: 12px;
-  right: 14px;
+.view-pill {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
+  align-items: stretch;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 3px 12px rgba(60, 45, 20, 0.12);
 }
 
-.room-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 253, 248, 0.9);
-  border: 2px solid var(--line);
-  border-radius: 10px;
-  padding: 6px 12px;
+.view-pill button {
+  font: inherit;
   font-size: 0.9rem;
   font-weight: 600;
+  border: 0;
+  background: transparent;
+  padding: 9px 14px;
   cursor: pointer;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
-.zoom-presets {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255, 253, 248, 0.9);
-  border: 2px solid var(--line);
-  border-radius: 10px;
-  padding: 5px 10px;
-  font-size: 0.85rem;
-  color: var(--muted);
-  font-weight: 600;
+.view-pill button:hover {
+  background: #f4eee0;
+  color: var(--ink);
+}
+
+.view-pill button.on {
+  background: var(--red);
+  color: #fff;
+}
+
+.view-pill-divider {
+  width: 2px;
+  background: var(--line);
 }
 
 .room-toggle input {
@@ -259,15 +281,11 @@ body {
 }
 
 .room-caption {
-  position: absolute;
-  bottom: 10px;
-  right: 14px;
   background: rgba(255, 253, 248, 0.82);
   border-radius: 8px;
   padding: 4px 12px;
   font-size: 0.8rem;
   color: var(--muted);
-  pointer-events: none;
 }
 
 /* ---------------------------------------------------------------- panels */
