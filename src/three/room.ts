@@ -151,8 +151,14 @@ function eamesChair(): THREE.Group {
 /** If real furniture models exist under public/models/ (eames-lounge.glb,
  *  noguchi-table.glb — e.g. converted from Herman Miller's SketchUp files),
  *  load one, normalize it to the given real-world height with its feet on
- *  y=0, and return it. Returns null when no model file is present. */
-async function tryLoadModel(name: string, targetHeightIn: number): Promise<THREE.Group | null> {
+ *  y=0, and return it. Returns null when no model file is present.
+ *  `remap` swaps in proper materials by mesh name — the official planning
+ *  models ship mostly untextured grey. */
+async function tryLoadModel(
+  name: string,
+  targetHeightIn: number,
+  remap?: (meshName: string) => THREE.Material | null,
+): Promise<THREE.Group | null> {
   try {
     const gltf = await new GLTFLoader().loadAsync(`${import.meta.env.BASE_URL}models/${name}.glb`)
     const g = gltf.scene
@@ -163,7 +169,16 @@ async function tryLoadModel(name: string, targetHeightIn: number): Promise<THREE
     box.setFromObject(g)
     g.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2)
     g.traverse((o) => {
-      if (o instanceof THREE.Mesh) o.castShadow = true
+      if (o instanceof THREE.Mesh) {
+        const mat = remap?.(o.name ?? '')
+        if (mat) o.material = mat
+        // planning models often ship unlit, without usable normals — lit
+        // materials render them black unless we compute normals ourselves
+        const geo = o.geometry as THREE.BufferGeometry
+        if (geo.getIndex() || !geo.getAttribute('normal')) geo.computeVertexNormals()
+        const transparent = (o.material as THREE.Material | undefined)?.transparent ?? false
+        o.castShadow = !transparent
+      }
     })
     const wrap = new THREE.Group()
     wrap.add(g)
@@ -380,7 +395,30 @@ export function buildRoom(): Room {
       }
     })
   }
-  void tryLoadModel('eames-lounge', 31.5).then((model) => {
+  // the official models come mostly untextured grey — dress the named parts
+  // DoubleSide throughout: SketchUp-exported meshes have inconsistent face
+  // winding, and single-sided materials render those faces black
+  const leather = new THREE.MeshStandardMaterial({ color: '#1d1917', roughness: 0.5, metalness: 0.05, side: THREE.DoubleSide })
+  const walnutShell = new THREE.MeshStandardMaterial({ color: '#6b4226', roughness: 0.3, metalness: 0.05, side: THREE.DoubleSide })
+  const aluminum = new THREE.MeshStandardMaterial({ color: '#b4b6ba', roughness: 0.25, metalness: 0.9, side: THREE.DoubleSide })
+  const walnutBase = new THREE.MeshStandardMaterial({ color: '#4a3018', roughness: 0.35, metalness: 0.05, side: THREE.DoubleSide })
+  const tableGlass = new THREE.MeshPhysicalMaterial({
+    color: '#9fc0ac',
+    transparent: true,
+    opacity: 0.35,
+    roughness: 0.05,
+    metalness: 0,
+    envMapIntensity: 1.4,
+    side: THREE.DoubleSide,
+  })
+
+  void tryLoadModel('eames-lounge', 31.5, (n) => {
+    if (n.includes('FABRIC')) return leather
+    if (n.includes('SHELL')) return walnutShell
+    if (n.includes('BASE')) return aluminum
+    if (n.includes('GLIDE')) return leather
+    return null
+  }).then((model) => {
     if (!model || disposed) return
     model.position.set(-52, FLOOR_Y, -25) // chair + ottoman set, centered between them
     model.rotation.y = 1.3
@@ -389,7 +427,10 @@ export function buildRoom(): Room {
     chair.visible = false
     ottoman.visible = false
   })
-  void tryLoadModel('noguchi-table', 15.75).then((model) => {
+  void tryLoadModel('noguchi-table', 15.75, (n) => {
+    if (n.includes('TOP')) return tableGlass
+    return walnutBase
+  }).then((model) => {
     if (!model || disposed) return
     model.position.set(16, FLOOR_Y, 18)
     model.rotation.y = -0.35
