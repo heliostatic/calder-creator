@@ -413,6 +413,92 @@ input[type='range'] {
   max-width: 640px;
   width: calc(100% - 40px);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+}
+
+.modal.wide {
+  max-width: 940px;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modal .hint a {
+  color: var(--accent);
+}
+
+.surprise-box {
+  background: #f4eee0;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin: 14px 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.surprise-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.surprise-controls select {
+  font: inherit;
+  padding: 8px 10px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.template-family {
+  margin-top: 20px;
+}
+
+.template-family h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 1.1rem;
+  margin-bottom: 2px;
+}
+
+.template-family h3 a {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.template-family h3 a:hover {
+  text-decoration: underline;
+}
+
+.template-thumb {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  padding: 6px 4px;
+}
+
+.template-stats {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.template-stats em {
+  font-style: normal;
+  color: var(--red-dark);
+  font-weight: 600;
 }
 
 .template-grid {
