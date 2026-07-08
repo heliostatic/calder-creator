@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { outline } from '../model/shapes'
 
 // A 20' × 20' room with a 9' ceiling, in inches. The mobile's ceiling hook is
@@ -108,43 +109,68 @@ function eamesChair(): THREE.Group {
 
   // back shell + cushion, raked ~24° (leaning away from the seat front at +z)
   const rake = 0.42
-  const backShell = shellSlab(30, 15, 1, wood)
+  const backShell = shellSlab(30, 14, 1, wood)
   backShell.rotation.x = rake
-  backShell.position.set(0, 22, -9.8)
+  backShell.position.set(0, 20.8, -8.6)
   g.add(backShell)
 
-  const backCushion = cushion(24, 13, 4.5, leather)
+  const backCushion = cushion(24, 12, 4.2, leather)
   backCushion.rotation.x = Math.PI / 2 + rake
-  backCushion.position.set(0, 22, -7.3)
+  backCushion.position.set(0, 20.8, -6.2)
   g.add(backCushion)
 
-  // headrest shell + cushion, raked a touch more
-  const headShell = shellSlab(30, 11, 1, wood)
-  headShell.rotation.x = rake + 0.14
-  headShell.position.set(0, 29.3, -13)
+  // headrest shell + cushion, just above the back with the signature gap
+  const headShell = shellSlab(30, 10, 1, wood)
+  headShell.rotation.x = rake + 0.1
+  headShell.position.set(0, 28.2, -12)
   g.add(headShell)
 
-  const headCushion = cushion(24, 9, 4.5, leather)
-  headCushion.rotation.x = Math.PI / 2 + rake + 0.14
-  headCushion.position.set(0, 29.2, -10.6)
+  const headCushion = cushion(24, 8.5, 4.2, leather)
+  headCushion.rotation.x = Math.PI / 2 + rake + 0.1
+  headCushion.position.set(0, 28.1, -9.6)
   g.add(headCushion)
 
-  // armrest pads, tucked against the seat sides
+  // armrest pads, resting on the seat cushion sides
   for (const s of [-1, 1] as const) {
-    const arm = cushion(5, 13, 2.6, leather)
-    arm.position.set(s * 13.5, 18.8, 0.5)
+    const arm = cushion(4.5, 12, 2.4, leather)
+    arm.position.set(s * 12.6, 17.6, 0.5)
     g.add(arm)
   }
 
   // exposed aluminum spines tying seat, back and headrest shells together
   for (const s of [-1, 1] as const) {
-    const spine = new THREE.Mesh(new THREE.BoxGeometry(1.1, 17, 1.6), metal)
-    spine.position.set(s * 12.5, 22.5, -12.2)
-    spine.rotation.x = 0.46
+    const spine = new THREE.Mesh(new THREE.BoxGeometry(1.1, 18, 1.5), metal)
+    spine.position.set(s * 11.8, 21, -10.4)
+    spine.rotation.x = 0.44
     spine.castShadow = true
     g.add(spine)
   }
   return g
+}
+
+/** If real furniture models exist under public/models/ (eames-lounge.glb,
+ *  noguchi-table.glb — e.g. converted from Herman Miller's SketchUp files),
+ *  load one, normalize it to the given real-world height with its feet on
+ *  y=0, and return it. Returns null when no model file is present. */
+async function tryLoadModel(name: string, targetHeightIn: number): Promise<THREE.Group | null> {
+  try {
+    const gltf = await new GLTFLoader().loadAsync(`${import.meta.env.BASE_URL}models/${name}.glb`)
+    const g = gltf.scene
+    const box = new THREE.Box3().setFromObject(g)
+    const height = box.max.y - box.min.y
+    if (!isFinite(height) || height <= 0) return null
+    g.scale.setScalar(targetHeightIn / height)
+    box.setFromObject(g)
+    g.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2)
+    g.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = true
+    })
+    const wrap = new THREE.Group()
+    wrap.add(g)
+    return wrap
+  } catch {
+    return null
+  }
 }
 
 /** Eames ottoman: 26"W × 20.75"D × 17.25"H */
@@ -343,6 +369,35 @@ export function buildRoom(): Room {
   table.rotation.y = -0.35
   group.add(table)
 
+  // swap in real models if they've been added to public/models/
+  let disposed = false
+  const trackModel = (model: THREE.Group) => {
+    model.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        disposables.push(o.geometry)
+        if (Array.isArray(o.material)) disposables.push(...o.material)
+        else disposables.push(o.material)
+      }
+    })
+  }
+  void tryLoadModel('eames-lounge', 31.5).then((model) => {
+    if (!model || disposed) return
+    model.position.set(-52, FLOOR_Y, -25) // chair + ottoman set, centered between them
+    model.rotation.y = 1.3
+    group.add(model)
+    trackModel(model)
+    chair.visible = false
+    ottoman.visible = false
+  })
+  void tryLoadModel('noguchi-table', 15.75).then((model) => {
+    if (!model || disposed) return
+    model.position.set(16, FLOOR_Y, 18)
+    model.rotation.y = -0.35
+    group.add(model)
+    trackModel(model)
+    table.visible = false
+  })
+
   // collect geometry/material disposables from the furniture builders
   group.traverse((obj) => {
     if (obj instanceof THREE.Mesh) {
@@ -355,6 +410,7 @@ export function buildRoom(): Room {
   return {
     group,
     dispose() {
+      disposed = true
       for (const d of disposables) d.dispose()
     },
   }
