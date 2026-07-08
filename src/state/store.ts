@@ -6,16 +6,14 @@ import { TEMPLATES } from '../model/templates'
 
 export type Mode = 'build' | 'test'
 export type View = 'editor' | 'plans'
-export type MobileVariant = 'viewer' | 'drawer' | 'tabs'
 
-/** Phone layout: picked by URL param (?mobile=viewer|drawer|tabs|off) for
- *  testing, otherwise on for small screens. */
-export function detectMobileVariant(): MobileVariant | null {
-  if (typeof window === 'undefined') return null
+/** Phone layout: on for small screens; force with ?mobile=on / ?mobile=off. */
+export function isPhoneLayout(): boolean {
+  if (typeof window === 'undefined') return false
   const p = new URLSearchParams(window.location.search).get('mobile')
-  if (p === 'off') return null
-  if (p === 'viewer' || p === 'drawer' || p === 'tabs') return p
-  return window.matchMedia('(max-width: 719px)').matches ? 'viewer' : null
+  if (p === 'off') return false
+  if (p) return true
+  return window.matchMedia('(max-width: 719px)').matches
 }
 
 const STORAGE_KEY = 'calder-creator-doc-v1'

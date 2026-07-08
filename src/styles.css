@@ -761,23 +761,19 @@ input[type='range'] {
   text-overflow: ellipsis;
 }
 
-.phone-breeze {
+.phone-actions {
   position: absolute;
   bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
-  align-items: center;
   gap: 10px;
-  background: rgba(255, 253, 248, 0.92);
-  border: 2px solid var(--line);
-  border-radius: 12px;
-  padding: 8px 14px;
-  font-size: 1.1rem;
 }
 
-.phone-breeze input {
-  width: 46vw;
+.phone-actions .btn {
+  font-weight: 700;
+  padding: 10px 18px;
+  box-shadow: 0 3px 12px rgba(60, 45, 20, 0.14);
 }
 
 .phone-bar {
@@ -809,10 +805,11 @@ input[type='range'] {
 
 .phone-note {
   margin: 0;
-  padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
+  padding: 7px 14px;
   background: #f4eee0;
+  border-top: 1px solid var(--line);
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   text-align: center;
 }
 
@@ -822,35 +819,6 @@ input[type='range'] {
   overflow-y: auto;
   padding: 14px;
   background: var(--panel);
-}
-
-.phone-drawer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: min(86vw, 400px);
-  background: var(--panel);
-  z-index: 40;
-  overflow-y: auto;
-  padding: 14px;
-  box-shadow: 8px 0 30px rgba(40, 30, 15, 0.25);
-}
-
-.phone-drawer-head {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 10px;
-  margin-bottom: 10px;
-  border-bottom: 2px solid var(--line);
-}
-
-.phone-scrim {
-  position: absolute;
-  inset: 0;
-  background: rgba(43, 39, 35, 0.4);
-  z-index: 30;
 }
 
 @media (max-width: 719px) {

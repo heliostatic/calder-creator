@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { detectMobileVariant, useStore } from '../state/store'
+import { isPhoneLayout, useStore } from '../state/store'
 import { MobileApp } from './MobileApp'
 import { Canvas3D } from './Canvas3D'
 import { TreePanel } from './TreePanel'
@@ -8,11 +8,11 @@ import { PlansView } from './PlansView'
 import { TemplatesModal } from './TemplatesModal'
 import type { MobileDoc } from '../model/types'
 
-const mobileVariant = detectMobileVariant()
+const phone = isPhoneLayout()
 
 export function App() {
   const view = useStore((s) => s.view)
-  if (mobileVariant) return <MobileApp variant={mobileVariant} />
+  if (phone) return <MobileApp />
   if (view === 'plans') return <PlansView />
   return <EditorView />
 }
