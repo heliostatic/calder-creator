@@ -26,6 +26,7 @@ function EditorView() {
   const setTemplatesOpen = useStore((s) => s.setTemplatesOpen)
   const showRoom = useStore((s) => s.showRoom)
   const setShowRoom = useStore((s) => s.setShowRoom)
+  const zoomTo = useStore((s) => s.zoomTo)
   const doc = useStore((s) => s.doc)
   const setDoc = useStore((s) => s.setDoc)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -94,10 +95,20 @@ function EditorView() {
         </aside>
         <div className="canvas-pane">
           <Canvas3D />
-          <label className="room-toggle">
-            <input type="checkbox" checked={showRoom} onChange={(e) => setShowRoom(e.target.checked)} />
-            Show room
-          </label>
+          <div className="view-controls">
+            <label className="room-toggle">
+              <input type="checkbox" checked={showRoom} onChange={(e) => setShowRoom(e.target.checked)} />
+              Show room
+            </label>
+            <div className="zoom-presets">
+              <button className="btn small" onClick={() => zoomTo('room')}>
+                🏠 Whole room
+              </button>
+              <button className="btn small" onClick={() => zoomTo('mobile')}>
+                🔍 Mobile
+              </button>
+            </div>
+          </div>
           {showRoom && (
             <span className="room-caption">Room: 20′ × 20′ · 9′ ceiling · Eames chair &amp; Noguchi table at true size</span>
           )}

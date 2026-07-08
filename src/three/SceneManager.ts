@@ -52,6 +52,16 @@ export class SceneManager {
   private world: CANNON.World | null = null
   private anchor: CANNON.Body | null = null
 
+  // camera glide between preset views
+  private camAnim: {
+    fromPos: THREE.Vector3
+    toPos: THREE.Vector3
+    fromTarget: THREE.Vector3
+    toTarget: THREE.Vector3
+    start: number
+    dur: number
+  } | null = null
+
   // drag state
   private dragBody: CANNON.Body | null = null
   private dragConstraint: CANNON.PointToPointConstraint | null = null
@@ -89,6 +99,10 @@ export class SceneManager {
     this.controls.minDistance = 12
     this.controls.maxDistance = 420
     this.controls.target.set(0, -30, 0)
+    // grabbing the view cancels any preset-zoom glide
+    this.controls.addEventListener('start', () => {
+      this.camAnim = null
+    })
 
     // lights: the environment map provides the fill; keep direct lights modest
     const hemi = new THREE.HemisphereLight('#fffdf7', '#cbbfa8', 0.55)
@@ -156,6 +170,40 @@ export class SceneManager {
   setRoomVisible(v: boolean): void {
     this.room.group.visible = v
     this.shadowCatcher.visible = !v
+  }
+
+  /** Glide the camera to a preset view. 'mobile' frames the mobile straight
+   *  on, filling the view; 'room' pulls back to take in the whole room. */
+  frameView(view: 'room' | 'mobile'): void {
+    if (!this.pose) return
+    const cx = (this.pose.min.x + this.pose.max.x) / 2
+    const cy = (this.pose.min.y + this.pose.max.y) / 2
+    const cz = (this.pose.min.z + this.pose.max.z) / 2
+    let toPos: THREE.Vector3
+    let toTarget: THREE.Vector3
+    if (view === 'mobile') {
+      const size = Math.max(
+        this.pose.max.x - this.pose.min.x,
+        this.pose.max.y - this.pose.min.y,
+        this.pose.max.z - this.pose.min.z,
+        14,
+      )
+      // fill the frame with a touch of margin, viewed nearly straight on
+      const dist = Math.max((size * 0.62) / Math.tan((this.camera.fov * Math.PI) / 360), 26)
+      toTarget = new THREE.Vector3(cx, cy, cz)
+      toPos = new THREE.Vector3(cx + dist * 0.12, cy + size * 0.04, cz + dist)
+    } else {
+      toTarget = new THREE.Vector3(0, FLOOR_Y + 52, 0)
+      toPos = new THREE.Vector3(105, FLOOR_Y + 82, 225)
+    }
+    this.camAnim = {
+      fromPos: this.camera.position.clone(),
+      toPos,
+      fromTarget: this.controls.target.clone(),
+      toTarget,
+      start: this.clock.elapsedTime,
+      dur: 0.8,
+    }
   }
 
   setSelected(id: string | null): void {
@@ -586,6 +634,15 @@ export class SceneManager {
   private animate = (): void => {
     this.rafId = requestAnimationFrame(this.animate)
     const dt = Math.min(this.clock.getDelta(), 0.05)
+
+    if (this.camAnim) {
+      const a = this.camAnim
+      const t = Math.min((this.clock.elapsedTime - a.start) / a.dur, 1)
+      const k = t * t * (3 - 2 * t) // smoothstep
+      this.camera.position.lerpVectors(a.fromPos, a.toPos, k)
+      this.controls.target.lerpVectors(a.fromTarget, a.toTarget, k)
+      if (t >= 1) this.camAnim = null
+    }
     this.controls.update()
 
     if (this.mode === 'test' && this.world) {

@@ -18,6 +18,8 @@ interface Store {
   breeze: number
   /** show the 20'×20' room backdrop, or a blank space */
   showRoom: boolean
+  /** preset-camera request; the nonce makes repeat clicks re-fire */
+  zoomRequest: { view: 'room' | 'mobile'; n: number } | null
   templatesOpen: boolean
   past: MobileDoc[]
   future: MobileDoc[]
@@ -33,6 +35,7 @@ interface Store {
   setView: (v: View) => void
   setBreeze: (b: number) => void
   setShowRoom: (v: boolean) => void
+  zoomTo: (view: 'room' | 'mobile') => void
   setTemplatesOpen: (open: boolean) => void
   /** bulk material editing across the whole mobile */
   setAllShapes: (patch: Partial<Pick<ShapeNode, 'wood' | 'thickness'>>) => void
@@ -72,6 +75,7 @@ export const useStore = create<Store>((set, get) => {
     view: 'editor',
     breeze: 0.35,
     showRoom: true,
+    zoomRequest: null,
     templatesOpen: false,
     past: [],
     future: [],
@@ -149,6 +153,7 @@ export const useStore = create<Store>((set, get) => {
     setView: (view) => set({ view }),
     setBreeze: (breeze) => set({ breeze }),
     setShowRoom: (showRoom) => set({ showRoom }),
+    zoomTo: (view) => set({ zoomRequest: { view, n: (get().zoomRequest?.n ?? 0) + 1 } }),
     setTemplatesOpen: (templatesOpen) => set({ templatesOpen }),
 
     setAllShapes: (patch) => {

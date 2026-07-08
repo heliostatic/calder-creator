@@ -37,6 +37,10 @@ export function Canvas3D() {
   useEffect(() => {
     manager.current?.setRoomVisible(showRoom)
   }, [showRoom])
+  const zoomRequest = useStore((s) => s.zoomRequest)
+  useEffect(() => {
+    if (zoomRequest) manager.current?.frameView(zoomRequest.view)
+  }, [zoomRequest])
   useEffect(() => {
     manager.current?.setSelected(selectedId)
   }, [selectedId])
