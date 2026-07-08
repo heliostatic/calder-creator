@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import * as CANNON from 'cannon-es'
 import type { ArmNode, MobileDoc, MobileNode, ShapeNode } from '../model/types'
 import { isArm } from '../model/types'
@@ -67,6 +68,12 @@ export class SceneManager {
 
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color('#ded7c9')
+    // image-based lighting so leather, glass and metal read as materials —
+    // kept subtle so the warm direct lighting still dominates
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    this.scene.environmentIntensity = 0.45
+    pmrem.dispose()
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.5, 1200)
     this.camera.position.set(30, -40, 120)
@@ -79,11 +86,9 @@ export class SceneManager {
     this.controls.maxDistance = 420
     this.controls.target.set(0, -30, 0)
 
-    // lights: warm key through the room, soft hemisphere + ambient fill
-    // (the ambient keeps the ceiling and wall interiors from going muddy)
-    const hemi = new THREE.HemisphereLight('#fffdf7', '#cbbfa8', 0.65)
+    // lights: the environment map provides the fill; keep direct lights modest
+    const hemi = new THREE.HemisphereLight('#fffdf7', '#cbbfa8', 0.55)
     this.scene.add(hemi)
-    this.scene.add(new THREE.AmbientLight('#fff6e6', 0.5))
     const dir = new THREE.DirectionalLight('#fff3dd', 1.5)
     dir.position.set(70, 60, 45)
     dir.castShadow = true

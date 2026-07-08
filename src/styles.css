@@ -208,6 +208,18 @@ body {
   color: var(--muted);
 }
 
+.room-caption {
+  position: absolute;
+  bottom: 10px;
+  right: 14px;
+  background: rgba(255, 253, 248, 0.82);
+  border-radius: 8px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
 /* ---------------------------------------------------------------- panels */
 
 h2 {

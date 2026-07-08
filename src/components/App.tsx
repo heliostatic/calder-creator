@@ -92,6 +92,7 @@ function EditorView() {
         </aside>
         <div className="canvas-pane">
           <Canvas3D />
+          <span className="room-caption">Room: 20′ × 20′ · 9′ ceiling · Eames chair &amp; Noguchi table at true size</span>
           <div className="mode-overlay">
             <div className="mode-toggle">
               <button className={mode === 'build' ? 'on' : ''} onClick={() => setMode('build')}>

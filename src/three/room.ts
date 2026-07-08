@@ -8,72 +8,141 @@ export const ROOM_D = 240
 export const ROOM_H = 108
 export const FLOOR_Y = -ROOM_H
 
-const ROSEWOOD = '#5e3a24'
-const LEATHER = '#26221f'
-const WALNUT = '#43301f'
-const ALUMINUM = '#8d8d93'
+const WALNUT = '#8a5a33'
+const WALNUT_DARK = '#6e4526'
+const LEATHER = '#211d1a'
+const BASE_METAL = '#242427'
 
-function box(
-  w: number,
-  h: number,
-  d: number,
-  mat: THREE.Material,
-  x = 0,
-  y = 0,
-  z = 0,
-  rx = 0,
-  rz = 0,
-): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
-  m.position.set(x, y, z)
-  m.rotation.x = rx
-  m.rotation.z = rz
+function roundedRect(w: number, d: number, r: number): THREE.Shape {
+  const s = new THREE.Shape()
+  const hw = w / 2
+  const hd = d / 2
+  s.moveTo(-hw + r, -hd)
+  s.lineTo(hw - r, -hd)
+  s.quadraticCurveTo(hw, -hd, hw, -hd + r)
+  s.lineTo(hw, hd - r)
+  s.quadraticCurveTo(hw, hd, hw - r, hd)
+  s.lineTo(-hw + r, hd)
+  s.quadraticCurveTo(-hw, hd, -hw, hd - r)
+  s.lineTo(-hw, -hd + r)
+  s.quadraticCurveTo(-hw, -hd, -hw + r, -hd)
+  return s
+}
+
+/** soft leather cushion: rounded-rect slab with a fat bevel */
+function cushion(w: number, d: number, h: number, mat: THREE.Material): THREE.Mesh {
+  const bevel = Math.min(h * 0.45, 1.6)
+  const geo = new THREE.ExtrudeGeometry(roundedRect(w - bevel * 2, d - bevel * 2, 2.5), {
+    depth: h - bevel * 2,
+    bevelEnabled: true,
+    bevelThickness: bevel,
+    bevelSize: bevel,
+    bevelSegments: 3,
+    curveSegments: 12,
+  })
+  geo.rotateX(-Math.PI / 2)
+  geo.translate(0, h - bevel, 0)
+  const m = new THREE.Mesh(geo, mat)
   m.castShadow = true
   return m
 }
 
-/** five-star pedestal base, shared by the chair and ottoman */
-function pedestal(mat: THREE.Material, columnH: number): THREE.Group {
+/** bent-plywood shell: a thin rounded-edge slab (reads as ply edge-on) */
+function shellSlab(w: number, h: number, thickness: number, mat: THREE.Material): THREE.Mesh {
+  const geo = new THREE.ExtrudeGeometry(roundedRect(w - 1.5, h - 1.5, 2.5), {
+    depth: thickness,
+    bevelEnabled: true,
+    bevelThickness: 0.6,
+    bevelSize: 0.75,
+    bevelSegments: 2,
+    curveSegments: 10,
+  })
+  geo.translate(0, 0, -thickness / 2)
+  const m = new THREE.Mesh(geo, mat)
+  m.castShadow = true
+  return m
+}
+
+/** five-star pedestal base with down-sloped legs and glides */
+function starBase(columnH: number, legLen: number, mat: THREE.Material): THREE.Group {
   const g = new THREE.Group()
-  const column = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, columnH, 12), mat)
-  column.position.y = 2 + columnH / 2
+  const column = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.4, columnH, 16), mat)
+  column.position.y = 2.2 + columnH / 2
   column.castShadow = true
   g.add(column)
   for (let i = 0; i < 5; i++) {
-    const leg = box(11, 1.6, 2.2, mat, 0, 1.2, 0)
-    leg.position.x = Math.cos((i / 5) * Math.PI * 2) * 5.5
-    leg.position.z = Math.sin((i / 5) * Math.PI * 2) * 5.5
-    leg.rotation.y = -(i / 5) * Math.PI * 2
+    const a = (i / 5) * Math.PI * 2
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(legLen, 1.3, 1.9), mat)
+    leg.position.set(Math.cos(a) * legLen * 0.42, 2.4, Math.sin(a) * legLen * 0.42)
+    leg.rotation.y = -a
+    leg.rotation.z = 0.16 // slope down toward the foot
+    leg.castShadow = true
     g.add(leg)
+    const glide = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.8, 1.2, 10), mat)
+    glide.position.set(Math.cos(a) * legLen * 0.82, 0.6, Math.sin(a) * legLen * 0.82)
+    g.add(glide)
   }
   return g
 }
 
 /** Eames lounge chair, standard size: 33.5"W × 35"D × 31.5"H, seat height 16".
- *  Low-poly homage built from boxes — shells in rosewood, cushions in black. */
+ *  Bent-plywood shells cradle tufted leather cushions on a five-star base. */
 function eamesChair(): THREE.Group {
   const g = new THREE.Group()
-  const shell = new THREE.MeshStandardMaterial({ color: ROSEWOOD, roughness: 0.4, metalness: 0.1 })
-  const cushion = new THREE.MeshStandardMaterial({ color: LEATHER, roughness: 0.7 })
-  const metal = new THREE.MeshStandardMaterial({ color: ALUMINUM, roughness: 0.35, metalness: 0.8 })
+  const wood = new THREE.MeshStandardMaterial({ color: WALNUT, roughness: 0.3, metalness: 0.05, side: THREE.DoubleSide })
+  const leather = new THREE.MeshStandardMaterial({ color: LEATHER, roughness: 0.55, metalness: 0.02 })
+  const metal = new THREE.MeshStandardMaterial({ color: BASE_METAL, roughness: 0.3, metalness: 0.85 })
 
-  g.add(pedestal(metal, 9))
+  g.add(starBase(8, 13, metal))
 
-  // seat shell + cushion (seat height 16", gentle backward rake)
-  g.add(box(30, 2.2, 24, shell, 0, 14.6, 1, -0.1))
-  g.add(box(26, 3.4, 21, cushion, 0, 17.2, 1.5, -0.1))
+  // seat shell (ply slab, gentle backward rake) + soft cushion; chair faces +z
+  const seatShell = shellSlab(30, 25, 1, wood)
+  seatShell.rotation.x = -Math.PI / 2 - 0.1
+  seatShell.position.set(0, 13.2, -0.5)
+  g.add(seatShell)
 
-  // back shell + cushion, raked ~22°
-  const rake = 0.38
-  g.add(box(30, 16, 2.2, shell, 0, 22.5, 11.5, rake))
-  g.add(box(26, 14, 3.4, cushion, 0, 22.5, 9.2, rake))
-  // headrest, raked a touch more
-  g.add(box(30, 10, 2.2, shell, 0, 30.5, 14.8, rake + 0.12))
-  g.add(box(26, 8.5, 3.4, cushion, 0, 30.3, 12.6, rake + 0.12))
+  const seatCushion = cushion(25, 21, 5.5, leather)
+  seatCushion.position.set(0, 13.6, 1)
+  seatCushion.rotation.x = -0.1
+  g.add(seatCushion)
 
-  // armrests
-  for (const s of [-1, 1]) {
-    g.add(box(4.5, 2.6, 15, cushion, s * 15.5, 20.5, 3))
+  // back shell + cushion, raked ~24° (leaning away from the seat front at +z)
+  const rake = 0.42
+  const backShell = shellSlab(30, 15, 1, wood)
+  backShell.rotation.x = rake
+  backShell.position.set(0, 22, -9.8)
+  g.add(backShell)
+
+  const backCushion = cushion(24, 13, 4.5, leather)
+  backCushion.rotation.x = Math.PI / 2 + rake
+  backCushion.position.set(0, 22, -7.3)
+  g.add(backCushion)
+
+  // headrest shell + cushion, raked a touch more
+  const headShell = shellSlab(30, 11, 1, wood)
+  headShell.rotation.x = rake + 0.14
+  headShell.position.set(0, 29.3, -13)
+  g.add(headShell)
+
+  const headCushion = cushion(24, 9, 4.5, leather)
+  headCushion.rotation.x = Math.PI / 2 + rake + 0.14
+  headCushion.position.set(0, 29.2, -10.6)
+  g.add(headCushion)
+
+  // armrest pads, tucked against the seat sides
+  for (const s of [-1, 1] as const) {
+    const arm = cushion(5, 13, 2.6, leather)
+    arm.position.set(s * 13.5, 18.8, 0.5)
+    g.add(arm)
+  }
+
+  // exposed aluminum spines tying seat, back and headrest shells together
+  for (const s of [-1, 1] as const) {
+    const spine = new THREE.Mesh(new THREE.BoxGeometry(1.1, 17, 1.6), metal)
+    spine.position.set(s * 12.5, 22.5, -12.2)
+    spine.rotation.x = 0.46
+    spine.castShadow = true
+    g.add(spine)
   }
   return g
 }
@@ -81,58 +150,84 @@ function eamesChair(): THREE.Group {
 /** Eames ottoman: 26"W × 20.75"D × 17.25"H */
 function eamesOttoman(): THREE.Group {
   const g = new THREE.Group()
-  const shell = new THREE.MeshStandardMaterial({ color: ROSEWOOD, roughness: 0.4, metalness: 0.1 })
-  const cushion = new THREE.MeshStandardMaterial({ color: LEATHER, roughness: 0.7 })
-  const metal = new THREE.MeshStandardMaterial({ color: ALUMINUM, roughness: 0.35, metalness: 0.8 })
-  g.add(pedestal(metal, 6))
-  g.add(box(24, 2, 19, shell, 0, 12.2, 0))
-  g.add(box(26, 4, 20.75, cushion, 0, 15.2, 0))
+  const wood = new THREE.MeshStandardMaterial({ color: WALNUT, roughness: 0.3, metalness: 0.05, side: THREE.DoubleSide })
+  const leather = new THREE.MeshStandardMaterial({ color: LEATHER, roughness: 0.55, metalness: 0.02 })
+  const metal = new THREE.MeshStandardMaterial({ color: BASE_METAL, roughness: 0.3, metalness: 0.85 })
+
+  g.add(starBase(5, 11, metal))
+
+  const pan = shellSlab(25, 20, 1, wood)
+  pan.rotation.x = -Math.PI / 2
+  pan.position.y = 10.8
+  g.add(pan)
+
+  const top = cushion(25, 19.5, 6, leather)
+  top.position.y = 11.2
+  g.add(top)
   return g
 }
 
+/** one sculpted base leg for the Noguchi table: a smooth arch blade that
+ *  stands on two feet, ~14.5" tall */
+function noguchiBlade(mat: THREE.Material): THREE.Mesh {
+  const s = new THREE.Shape()
+  s.moveTo(-10.5, 0)
+  s.quadraticCurveTo(-10.5, 14.5, 1, 14.5) // outer: up and over
+  s.quadraticCurveTo(11, 14.5, 11, 0) // outer: down the far side
+  s.lineTo(7.2, 0)
+  s.quadraticCurveTo(7.2, 11, 0.5, 11) // inner arch back
+  s.quadraticCurveTo(-6.8, 11, -6.8, 0)
+  s.closePath()
+  const geo = new THREE.ExtrudeGeometry(s, {
+    depth: 1.7,
+    bevelEnabled: true,
+    bevelThickness: 0.3,
+    bevelSize: 0.3,
+    bevelSegments: 2,
+    curveSegments: 24,
+  })
+  geo.translate(0, 0, -0.85)
+  const m = new THREE.Mesh(geo, mat)
+  m.castShadow = true
+  return m
+}
+
 /** Noguchi coffee table: 50" × 36" freeform glass top, 15.75" tall, ¾" glass,
- *  on two interlocked curved wood legs. */
+ *  on two identical sculpted blades, one inverted against the other. */
 function noguchiTable(): THREE.Group {
   const g = new THREE.Group()
 
   const glassPts = outline('blob', 50, 36)
   const glassShape = new THREE.Shape(glassPts.map((p) => new THREE.Vector2(p.x, p.y)))
-  const glassGeo = new THREE.ExtrudeGeometry(glassShape, { depth: 0.75, bevelEnabled: false, curveSegments: 24 })
+  const glassGeo = new THREE.ExtrudeGeometry(glassShape, { depth: 0.75, bevelEnabled: false, curveSegments: 32 })
   const glass = new THREE.Mesh(
     glassGeo,
     new THREE.MeshPhysicalMaterial({
-      color: '#aac4b2',
+      color: '#8fb5a0',
       transparent: true,
-      opacity: 0.32,
-      roughness: 0.08,
+      opacity: 0.42,
+      roughness: 0.05,
       metalness: 0,
+      envMapIntensity: 1.4,
       side: THREE.DoubleSide,
     }),
   )
   glass.rotation.x = -Math.PI / 2
-  glass.position.y = 15.0 // after the rotation the ¾" extrusion grows upward, topping out at 15.75
-  glass.castShadow = false
+  glass.position.y = 15.0 // ¾" extrusion grows upward after the rotation → top at 15.75
   g.add(glass)
 
-  // two matching curved legs (petal slabs), one inverted against the other
-  const wood = new THREE.MeshStandardMaterial({ color: WALNUT, roughness: 0.45 })
-  const legPts = outline('petal', 9, 13)
-  const legShape = new THREE.Shape(legPts.map((p) => new THREE.Vector2(p.x, p.y)))
-  const legGeo = new THREE.ExtrudeGeometry(legShape, { depth: 1.8, bevelEnabled: false, curveSegments: 16 })
-  legGeo.center()
+  const wood = new THREE.MeshStandardMaterial({ color: WALNUT_DARK, roughness: 0.25, metalness: 0.05 })
 
-  const legA = new THREE.Mesh(legGeo, wood)
-  legA.position.set(-5, 6.6, 0)
-  legA.rotation.z = 0.3
-  legA.castShadow = true
-  g.add(legA)
+  // two arch blades crossing at an angle, like the interlocked original
+  const bladeA = noguchiBlade(wood)
+  bladeA.rotation.y = 0.3
+  bladeA.position.set(-2, 0, 1)
+  g.add(bladeA)
 
-  const legB = new THREE.Mesh(legGeo, wood)
-  legB.position.set(5, 6.6, 0)
-  legB.rotation.z = Math.PI - 0.3
-  legB.rotation.y = 0.25
-  legB.castShadow = true
-  g.add(legB)
+  const bladeB = noguchiBlade(wood)
+  bladeB.rotation.y = Math.PI * 0.62
+  bladeB.position.set(2.5, 0, -1)
+  g.add(bladeB)
 
   return g
 }
@@ -153,7 +248,7 @@ function plankTexture(): THREE.CanvasTexture {
     ctx.fillStyle = 'rgba(90, 60, 30, 0.5)'
     ctx.fillRect(0, i * plank, 512, 1.5)
     // butt joints, staggered
-    const joint = ((i * 197) % 512)
+    const joint = (i * 197) % 512
     ctx.fillRect(joint, i * plank, 1.5, plank)
   }
   const tex = new THREE.CanvasTexture(c)
@@ -232,14 +327,15 @@ export function buildRoom(): Room {
 
   // classic living-room arrangement: coffee table just off the room's center
   // (under the mobile), chair and ottoman angled toward it
+  // the chair is modeled facing +z, so this rotation turns it toward the table
   const chair = eamesChair()
   chair.position.set(-62, FLOOR_Y, -32)
-  chair.rotation.y = 0.55 + Math.PI
+  chair.rotation.y = 1.3
   group.add(chair)
 
   const ottoman = eamesOttoman()
-  ottoman.position.set(-37, FLOOR_Y, -10)
-  ottoman.rotation.y = 0.55 + Math.PI
+  ottoman.position.set(-34, FLOOR_Y, -14)
+  ottoman.rotation.y = 1.3
   group.add(ottoman)
 
   const table = noguchiTable()
