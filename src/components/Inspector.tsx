@@ -70,7 +70,7 @@ function MobileSettings() {
         label="Hanging wire length"
         value={doc.hangerDrop}
         min={2}
-        max={24}
+        max={48}
         step={0.5}
         format={fmtIn}
         onChange={(v) => updateDoc({ hangerDrop: v })}

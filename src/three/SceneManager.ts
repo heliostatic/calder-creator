@@ -7,6 +7,8 @@ import { computePose, shapeWeightOz } from '../model/balance'
 import type { Pose } from '../model/balance'
 import { WIRES } from '../model/materials'
 import { holePos, outline, shapeArea } from '../model/shapes'
+import { FLOOR_Y, buildRoom } from './room'
+import type { Room } from './room'
 
 // Physics runs directly in inches + ounces: gravity is 386 in/s² and all
 // forces are oz·in/s², so no unit conversion is needed anywhere.
@@ -39,7 +41,7 @@ export class SceneManager {
   private hangerGroup: THREE.Group | null = null
   private hangerBody: CANNON.Body | null = null
   private mobileRoot = new THREE.Group()
-  private floor: THREE.Mesh
+  private room: Room
   private disposables: { dispose(): void }[] = []
 
   private world: CANNON.World | null = null
@@ -64,51 +66,39 @@ export class SceneManager {
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
-    this.scene.background = new THREE.Color('#eef1f4')
-    this.scene.fog = new THREE.Fog('#eef1f4', 180, 420)
+    this.scene.background = new THREE.Color('#ded7c9')
 
-    this.camera = new THREE.PerspectiveCamera(40, 1, 0.5, 800)
-    this.camera.position.set(0, -18, 70)
+    this.camera = new THREE.PerspectiveCamera(45, 1, 0.5, 1200)
+    this.camera.position.set(30, -40, 120)
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.08
     this.controls.maxPolarAngle = Math.PI * 0.72
     this.controls.minDistance = 12
-    this.controls.maxDistance = 300
-    this.controls.target.set(0, -18, 0)
+    this.controls.maxDistance = 420
+    this.controls.target.set(0, -30, 0)
 
-    // lights
-    const hemi = new THREE.HemisphereLight('#ffffff', '#cfc4b0', 0.9)
+    // lights: warm key through the room, soft hemisphere + ambient fill
+    // (the ambient keeps the ceiling and wall interiors from going muddy)
+    const hemi = new THREE.HemisphereLight('#fffdf7', '#cbbfa8', 0.65)
     this.scene.add(hemi)
-    const dir = new THREE.DirectionalLight('#fff6e8', 1.6)
-    dir.position.set(40, 30, 25)
+    this.scene.add(new THREE.AmbientLight('#fff6e6', 0.5))
+    const dir = new THREE.DirectionalLight('#fff3dd', 1.5)
+    dir.position.set(70, 60, 45)
     dir.castShadow = true
     dir.shadow.mapSize.set(2048, 2048)
-    dir.shadow.camera.left = -60
-    dir.shadow.camera.right = 60
-    dir.shadow.camera.top = 40
-    dir.shadow.camera.bottom = -90
-    dir.shadow.camera.far = 250
+    dir.shadow.camera.left = -140
+    dir.shadow.camera.right = 140
+    dir.shadow.camera.top = 60
+    dir.shadow.camera.bottom = -160
+    dir.shadow.camera.far = 400
     dir.shadow.bias = -0.0005
     this.scene.add(dir)
 
-    // ceiling plate + floor
-    const plate = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.6, 1.9, 0.5, 32),
-      new THREE.MeshStandardMaterial({ color: '#b9b2a4', roughness: 0.7 }),
-    )
-    plate.position.y = 0.25
-    this.scene.add(plate)
-
-    this.floor = new THREE.Mesh(
-      new THREE.CircleGeometry(220, 48),
-      new THREE.MeshStandardMaterial({ color: '#e6e0d3', roughness: 1 }),
-    )
-    this.floor.rotation.x = -Math.PI / 2
-    this.floor.receiveShadow = true
-    this.floor.position.y = -70
-    this.scene.add(this.floor)
+    // the 20' × 20' room with furniture for scale; ceiling hook at world origin
+    this.room = buildRoom()
+    this.scene.add(this.room.group)
 
     this.scene.add(this.mobileRoot)
 
@@ -160,6 +150,7 @@ export class SceneManager {
     el.removeEventListener('pointermove', this.onPointerMove)
     el.removeEventListener('pointerup', this.onPointerUp)
     this.clearMobile()
+    this.room.dispose()
     this.controls.dispose()
     this.renderer.dispose()
     el.remove()
@@ -420,8 +411,6 @@ export class SceneManager {
       }
     }
 
-    // keep the floor a consistent distance under the mobile
-    this.floor.position.y = Math.min(this.pose.min.y - 16, -40)
   }
 
   private frameCameraIfNeeded(): void {
@@ -438,8 +427,12 @@ export class SceneManager {
       this.pose.max.z - this.pose.min.z,
       20,
     )
-    this.controls.target.set(cx, cy, cz)
-    this.camera.position.set(cx + size * 0.35, cy + size * 0.35, cz + size * 1.9)
+    // compose like an interior photo: eye at standing height, aimed so the
+    // mobile floats in the upper half with the furniture anchoring the lower
+    const targetY = cy * 0.35 + (FLOOR_Y + 40) * 0.65
+    this.controls.target.set(cx, targetY, cz)
+    const dist = Math.max(size * 2.6, 175)
+    this.camera.position.set(cx + dist * 0.5, FLOOR_Y + 60, cz + dist)
   }
 
   // ------------------------------------------------------------- interaction
