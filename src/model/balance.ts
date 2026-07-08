@@ -108,6 +108,70 @@ function v3(x: number, y: number, z: number): V3 {
   return { x, y, z }
 }
 
+/** Footprint of one placed shape, used to keep pieces from overlapping. */
+interface Placed {
+  x: number
+  y: number
+  z: number
+  r: number
+  halfH: number
+}
+
+function armEnds(node: ArmNode, hangW: V3, yaw: number): { leftEndW: V3; rightEndW: V3; tilt: number } {
+  const tilt = armTiltRad(node)
+  const cosT = Math.cos(tilt)
+  const sinT = Math.sin(tilt)
+  // local arm frame: x along arm (left → right), pivot at (p, h) rel left end.
+  // tilt > 0 lowers the left end. yaw rotates about the vertical axis.
+  const toWorld = (lx: number, ly: number): V3 => {
+    const u = lx - node.pivot
+    const vv = ly - node.pivotHeight
+    const dAlong = u * cosT - vv * sinT
+    const dy = u * sinT + vv * cosT
+    return v3(hangW.x + dAlong * Math.cos(yaw), hangW.y + dy, hangW.z - dAlong * Math.sin(yaw))
+  }
+  return { leftEndW: toWorld(0, 0), rightEndW: toWorld(node.length, 0), tilt }
+}
+
+function shapeFootprint(node: Extract<MobileNode, { kind: 'shape' }>, hangW: V3, yaw: number): { centerW: V3; placed: Placed } {
+  const hole = holePos(node.shape, node.width, node.height)
+  // shape hangs plumb from its hole; center offset rotated by its yaw
+  const centerW = v3(hangW.x - hole.x * Math.cos(yaw), hangW.y - hole.y, hangW.z + hole.x * Math.sin(yaw))
+  return {
+    centerW,
+    placed: { x: centerW.x, y: centerW.y, z: centerW.z, r: Math.max(node.width, node.height) / 2, halfH: node.height / 2 },
+  }
+}
+
+/** How badly a tentative set of shapes collides with what's already placed. */
+function overlapPenalty(placed: Placed[], candidate: Placed[]): number {
+  let pen = 0
+  for (const c of candidate) {
+    for (const p of placed) {
+      if (Math.abs(c.y - p.y) > c.halfH + p.halfH + 0.75) continue
+      const d = Math.hypot(c.x - p.x, c.z - p.z)
+      const gap = c.r + p.r + 1.0 - d
+      if (gap > 0) pen += gap * gap
+    }
+  }
+  return pen
+}
+
+/** Collect the shape footprints of a whole subtree using the default yaw rule
+ *  (no optimization) — used to score candidate rotations cheaply. */
+function collectFootprints(node: MobileNode, hangW: V3, yaw: number, depth: number, out: Placed[]): void {
+  if (node.kind === 'shape') {
+    out.push(shapeFootprint(node, hangW, yaw).placed)
+    return
+  }
+  const { leftEndW, rightEndW } = armEnds(node, hangW, yaw)
+  const spread = 0.95 - depth * 0.12
+  collectFootprints(node.left, v3(leftEndW.x, leftEndW.y - node.dropLeft, leftEndW.z), yaw + spread, depth + 1, out)
+  collectFootprints(node.right, v3(rightEndW.x, rightEndW.y - node.dropRight, rightEndW.z), yaw - spread, depth + 1, out)
+}
+
+const YAW_CANDIDATES = [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, Math.PI / 2]
+
 export function computePose(doc: MobileDoc): Pose {
   const pose: Pose = {
     arms: new Map(),
@@ -115,6 +179,7 @@ export function computePose(doc: MobileDoc): Pose {
     min: v3(Infinity, Infinity, Infinity),
     max: v3(-Infinity, -Infinity, -Infinity),
   }
+  const placed: Placed[] = []
 
   const grow = (p: V3, r = 0) => {
     pose.min.x = Math.min(pose.min.x, p.x - r)
@@ -126,49 +191,51 @@ export function computePose(doc: MobileDoc): Pose {
   }
   grow(v3(0, 0, 0))
 
+  /** Pick the subtree rotation that overlaps least with everything placed so
+   *  far. Ties (e.g. an empty scene) go to the default aesthetic spread, and
+   *  arms edge-on to the default camera are lightly penalized. */
+  const bestYaw = (node: MobileNode, hangW: V3, preferred: number, depth: number): number => {
+    if (node.kind === 'shape' && Math.abs(holePos(node.shape, node.width, node.height).x) < 0.2) return preferred
+    let best = preferred
+    let bestScore = Infinity
+    for (const offset of YAW_CANDIDATES) {
+      const yaw = preferred + offset
+      const tentative: Placed[] = []
+      collectFootprints(node, hangW, yaw, depth, tentative)
+      let score = overlapPenalty(placed, tentative)
+      score += 0.12 * Math.abs(offset) // prefer the natural spread
+      if (node.kind === 'arm') score += 0.6 * Math.pow(Math.abs(Math.sin(yaw)), 4) // avoid edge-on arms
+      if (score < bestScore - 1e-6) {
+        bestScore = score
+        best = yaw
+      }
+    }
+    return best
+  }
+
   const place = (node: MobileNode, hangW: V3, yaw: number, depth: number): void => {
     if (node.kind === 'shape') {
-      const hole = holePos(node.shape, node.width, node.height)
-      // shape hangs plumb from its hole; center offset rotated by its yaw
-      const cx = -hole.x * Math.cos(yaw)
-      const cz = hole.x * Math.sin(yaw)
-      const centerW = v3(hangW.x + cx, hangW.y - hole.y, hangW.z + cz)
+      const { centerW, placed: fp } = shapeFootprint(node, hangW, yaw)
       pose.shapes.set(node.id, { kind: 'shape', holeW: hangW, centerW, yawRad: yaw })
+      placed.push(fp)
       grow(centerW, Math.max(node.width, node.height) / 2)
       return
     }
 
-    const tilt = armTiltRad(node)
-    const cosT = Math.cos(tilt)
-    const sinT = Math.sin(tilt)
-    // local arm frame: x along arm (left → right), pivot at (p, h) rel left end.
-    // tilt > 0 lowers the left end. yaw rotates about the vertical axis.
-    const toWorld = (lx: number, ly: number): V3 => {
-      const u = lx - node.pivot
-      const vv = ly - node.pivotHeight
-      // rotate by tilt in the vertical plane of the arm (θ>0 → left end down)
-      const dAlong = u * cosT - vv * sinT
-      const dy = u * sinT + vv * cosT
-      return v3(
-        hangW.x + dAlong * Math.cos(yaw),
-        hangW.y + dy,
-        hangW.z - dAlong * Math.sin(yaw),
-      )
-    }
-    const leftEndW = toWorld(0, 0)
-    const rightEndW = toWorld(node.length, 0)
+    const { leftEndW, rightEndW, tilt } = armEnds(node, hangW, yaw)
     pose.arms.set(node.id, { kind: 'arm', pivotW: hangW, leftEndW, rightEndW, tiltRad: tilt, yawRad: yaw })
     grow(leftEndW)
     grow(rightEndW)
 
     // children hang plumb below the end loops on their drop wires
-    const leftHang = v3(leftEndW.x, leftEndW.y - node.dropLeft, leftEndW.z)
-    const rightHang = v3(rightEndW.x, rightEndW.y - node.dropRight, rightEndW.z)
     const spread = 0.95 - depth * 0.12
-    place(node.left, leftHang, yaw + spread, depth + 1)
-    place(node.right, rightHang, yaw - spread, depth + 1)
+    const leftHang = v3(leftEndW.x, leftEndW.y - node.dropLeft, leftEndW.z)
+    place(node.left, leftHang, bestYaw(node.left, leftHang, yaw + spread, depth + 1), depth + 1)
+    const rightHang = v3(rightEndW.x, rightEndW.y - node.dropRight, rightEndW.z)
+    place(node.right, rightHang, bestYaw(node.right, rightHang, yaw - spread, depth + 1), depth + 1)
   }
 
-  place(doc.root, v3(0, -doc.hangerDrop, 0), 0.35, 0)
+  const rootHang = v3(0, -doc.hangerDrop, 0)
+  place(doc.root, rootHang, bestYaw(doc.root, rootHang, 0.35, 0), 0)
   return pose
 }

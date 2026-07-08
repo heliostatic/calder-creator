@@ -169,17 +169,62 @@ export function centroid(kind: ShapeKind, w: number, h: number): Pt {
   return { x: cx / (3 * a), y: cy / (3 * a) }
 }
 
-/** Where the hanging hole gets drilled: just below the topmost point of the
- *  outline, pulled slightly toward the centroid so it lands inside the material. */
+function pointInPolygon(pts: Pt[], x: number, y: number): boolean {
+  let inside = false
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i]
+    const b = pts[j]
+    if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside
+  }
+  return inside
+}
+
+function distToOutline(pts: Pt[], x: number, y: number): number {
+  let best = Infinity
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]
+    const b = pts[(i + 1) % pts.length]
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len2 = dx * dx + dy * dy
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2)) : 0
+    const px = a.x + t * dx - x
+    const py = a.y + t * dy - y
+    best = Math.min(best, px * px + py * py)
+  }
+  return Math.sqrt(best)
+}
+
+const holeCache = new Map<string, Pt>()
+
+/** Where the hanging hole gets drilled: as high on the shape as possible while
+ *  keeping a safe ring of material around the hole. Scans down from the top of
+ *  the shape until a spot with enough clearance exists — this keeps the hole
+ *  inside thin shapes like the crescent, whose top tip has almost no material. */
 export function holePos(kind: ShapeKind, w: number, h: number): Pt {
+  const key = `${kind}|${w}|${h}`
+  const hit = holeCache.get(key)
+  if (hit) return hit
   const pts = outline(kind, w, h)
   let top = pts[0]
   for (const p of pts) if (p.y > top.y) top = p
-  const c = centroid(kind, w, h)
-  const dx = c.x - top.x
-  const dy = c.y - top.y
-  const len = Math.hypot(dx, dy) || 1
-  return { x: top.x + (dx / len) * HOLE_INSET_IN, y: top.y + (dy / len) * HOLE_INSET_IN }
+  const clearance = Math.min(HOLE_INSET_IN * 0.65, w * 0.13, h * 0.13)
+
+  let result: Pt | null = null
+  const yStep = Math.max(h / 60, 0.03)
+  const xStep = Math.max(w / 60, 0.03)
+  for (let y = h / 2 - clearance; y > -h / 2 && !result; y -= yStep) {
+    let bestX: number | null = null
+    for (let x = -w / 2 + clearance; x <= w / 2 - clearance; x += xStep) {
+      if (!pointInPolygon(pts, x, y)) continue
+      if (distToOutline(pts, x, y) < clearance) continue
+      if (bestX === null || Math.abs(x - top.x) < Math.abs(bestX - top.x)) bestX = x
+    }
+    if (bestX !== null) result = { x: bestX, y }
+  }
+  const pos = result ?? centroid(kind, w, h)
+  holeCache.set(key, pos)
+  return pos
 }
 
 /** SVG path (y flipped so +y in model = up on screen), in inch units. */

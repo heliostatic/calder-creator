@@ -6,7 +6,7 @@ import { isArm } from '../model/types'
 import { computePose, shapeWeightOz } from '../model/balance'
 import type { Pose } from '../model/balance'
 import { WIRES } from '../model/materials'
-import { holePos, outline } from '../model/shapes'
+import { holePos, outline, shapeArea } from '../model/shapes'
 
 // Physics runs directly in inches + ounces: gravity is 386 in/s² and all
 // forces are oz·in/s², so no unit conversion is needed anywhere.
@@ -524,20 +524,31 @@ export class SceneManager {
 
   // ------------------------------------------------------------------- loop
 
+  /** Wind as a real aerodynamic force: F = ½ ρ Cd A v², with slowly wandering
+   *  direction and gusts that die down to near-still lulls. Because the force
+   *  scales with each shape's actual cut area (not its mass), small pieces get
+   *  proportionally small pushes. */
   private applyBreeze(t: number): void {
     if (!this.world || this.breeze <= 0.001) return
-    const A = this.breeze * 90 // peak acceleration, in/s²
+    const AIR_OZ_IN3 = 7.08e-4
+    const CD = 1.2
+    // slider → wind speed, in/s (max ≈ 2.5 m/s — a light indoor breeze)
+    const windSpeed = Math.pow(this.breeze, 1.5) * 100
+    const windDir = t * 0.11 // wind direction slowly wanders around the room
     let i = 0
     for (const vis of this.visuals.values()) {
       if (!vis.body || vis.node.kind !== 'shape') continue
       i += 1
       const phase = i * 1.7
-      const gust = 0.55 + 0.45 * Math.sin(t * 0.23 + phase * 2.1)
-      const ax = Math.sin(t * 0.9 + phase) * A * gust
-      const az = Math.cos(t * 0.67 + phase * 1.3) * A * gust
-      const f = new CANNON.Vec3(ax * vis.body.mass, 0, az * vis.body.mass)
-      // apply slightly off-center so shapes also twist and the mobile rotates
-      const offset = vis.body.quaternion.vmult(new CANNON.Vec3(vis.node.width / 4, 0, 0))
+      // gusts with real lulls: mostly calm, occasional pushes
+      const g = 0.5 + 0.5 * Math.sin(t * 0.31 + phase) * Math.sin(t * 0.13 + phase * 2.3)
+      const gust = Math.max(0.08, g * g)
+      const v = windSpeed * gust
+      const area = shapeArea(vis.node.shape, vis.node.width, vis.node.height)
+      const mag = 0.5 * AIR_OZ_IN3 * CD * area * v * v
+      const f = new CANNON.Vec3(Math.sin(windDir + phase * 0.15) * mag, 0, Math.cos(windDir + phase * 0.15) * mag)
+      // apply slightly off-center so shapes also twist and the mobile slowly rotates
+      const offset = vis.body.quaternion.vmult(new CANNON.Vec3(vis.node.width / 6, 0, 0))
       vis.body.applyForce(f, vis.body.position.vadd(offset))
     }
   }
