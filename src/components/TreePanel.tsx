@@ -8,13 +8,20 @@ import { SHAPE_LABELS } from '../model/shapes'
 
 export function TreePanel() {
   const doc = useStore((s) => s.doc)
+  const selectedId = useStore((s) => s.selectedId)
+  const select = useStore((s) => s.select)
   const labels = labelNodes(doc.root)
 
   return (
     <div className="tree-panel">
       <h2>Parts of your mobile</h2>
       <p className="hint">Click a part to change it.</p>
-      <NodeRow node={doc.root} labels={labels} depth={0} />
+      <button className={`tree-row ${selectedId === null ? 'selected' : ''}`} onClick={() => select(null)}>
+        <span className="arm-icon">🎈</span>
+        <span className="tree-label">The whole mobile</span>
+        <span className="tree-sub">{doc.name}</span>
+      </button>
+      <NodeRow node={doc.root} labels={labels} depth={1} />
     </div>
   )
 }
