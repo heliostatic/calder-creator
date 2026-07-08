@@ -371,12 +371,12 @@ export function buildRoom(): Room {
   // the chair is modeled facing +z, so this rotation turns it toward the table
   const chair = eamesChair()
   chair.position.set(-62, FLOOR_Y, -32)
-  chair.rotation.y = 1.3
+  chair.rotation.y = -0.5
   group.add(chair)
 
   const ottoman = eamesOttoman()
   ottoman.position.set(-34, FLOOR_Y, -14)
-  ottoman.rotation.y = 1.3
+  ottoman.rotation.y = -0.5
   group.add(ottoman)
 
   const table = noguchiTable()
@@ -421,7 +421,7 @@ export function buildRoom(): Room {
   }).then((model) => {
     if (!model || disposed) return
     model.position.set(-52, FLOOR_Y, -25) // chair + ottoman set, centered between them
-    model.rotation.y = 1.3
+    model.rotation.y = -0.5
     group.add(model)
     trackModel(model)
     chair.visible = false
