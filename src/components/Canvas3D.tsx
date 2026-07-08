@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { SceneManager } from '../three/SceneManager'
-import { useStore } from '../state/store'
+import { detectMobileVariant, useStore } from '../state/store'
 
 export function Canvas3D() {
   const holder = useRef<HTMLDivElement>(null)
@@ -17,6 +17,7 @@ export function Canvas3D() {
     if (!holder.current) return
     const m = new SceneManager(holder.current)
     m.onPick = (id) => useStore.getState().select(id)
+    if (detectMobileVariant()) m.frameStyle = 'closeup'
     manager.current = m
     return () => {
       m.dispose()

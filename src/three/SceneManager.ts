@@ -70,6 +70,9 @@ export class SceneManager {
 
   onPick: ((id: string | null) => void) | null = null
 
+  /** how new mobiles get framed: interior photo (desktop) or close-up (phone) */
+  frameStyle: 'interior' | 'closeup' = 'interior'
+
   private rafId = 0
 
   constructor(container: HTMLElement) {
@@ -173,8 +176,9 @@ export class SceneManager {
   }
 
   /** Glide the camera to a preset view. 'mobile' frames the mobile straight
-   *  on, filling the view; 'room' pulls back to take in the whole room. */
-  frameView(view: 'room' | 'mobile'): void {
+   *  on, filling the view; 'room' pulls back to take in the whole room.
+   *  `immediate` jumps there without the glide. */
+  frameView(view: 'room' | 'mobile', immediate = false): void {
     if (!this.pose) return
     const cx = (this.pose.min.x + this.pose.max.x) / 2
     const cy = (this.pose.min.y + this.pose.max.y) / 2
@@ -188,13 +192,23 @@ export class SceneManager {
         this.pose.max.z - this.pose.min.z,
         14,
       )
-      // fill the frame with a touch of margin, viewed nearly straight on
-      const dist = Math.max((size * 0.62) / Math.tan((this.camera.fov * Math.PI) / 360), 26)
+      // fill the frame with a touch of margin, viewed nearly straight on —
+      // use the tighter of the vertical/horizontal view angles so portrait
+      // phone screens don't crop wide mobiles
+      const vHalf = (this.camera.fov * Math.PI) / 360
+      const hHalf = Math.atan(Math.tan(vHalf) * this.camera.aspect)
+      const dist = Math.max((size * 0.62) / Math.tan(Math.min(vHalf, hHalf)), 26)
       toTarget = new THREE.Vector3(cx, cy, cz)
       toPos = new THREE.Vector3(cx + dist * 0.12, cy + size * 0.04, cz + dist)
     } else {
       toTarget = new THREE.Vector3(0, FLOOR_Y + 52, 0)
       toPos = new THREE.Vector3(105, FLOOR_Y + 82, 225)
+    }
+    if (immediate) {
+      this.camAnim = null
+      this.camera.position.copy(toPos)
+      this.controls.target.copy(toTarget)
+      return
     }
     this.camAnim = {
       fromPos: this.camera.position.clone(),
@@ -512,6 +526,10 @@ export class SceneManager {
       this.pose.max.z - this.pose.min.z,
       20,
     )
+    if (this.frameStyle === 'closeup') {
+      this.frameView('mobile', true)
+      return
+    }
     // compose like an interior photo: eye at standing height, aimed so the
     // mobile floats in the upper half with the furniture anchoring the lower
     const targetY = cy * 0.35 + (FLOOR_Y + 40) * 0.65
