@@ -620,32 +620,64 @@ export class SceneManager {
 
   // ------------------------------------------------------------------- loop
 
-  /** Wind as a real aerodynamic force: F = ½ ρ Cd A v², with slowly wandering
-   *  direction and gusts that die down to near-still lulls. Because the force
-   *  scales with each shape's actual cut area (not its mass), small pieces get
-   *  proportionally small pushes. */
+  /** Wind as honest plate aerodynamics. Per shape:
+   *  - drag from the RELATIVE velocity (wind minus the piece's own motion),
+   *    so a piece already moving with the wind stops being pushed — motion
+   *    self-limits instead of accumulating forever
+   *  - force scaled by projected area: face-on catches everything, edge-on
+   *    almost nothing
+   *  - center of pressure slightly downwind within the plate's plane, so
+   *    pieces feather into the wind like weathervanes and re-align lazily as
+   *    the wind direction wanders — drift, pause, reverse
+   *  - quadratic rotational drag so any spin bleeds off the way a plate
+   *    stirring air actually would */
   private applyBreeze(t: number): void {
     if (!this.world || this.breeze <= 0.001) return
     const AIR_OZ_IN3 = 7.08e-4
     const CD = 1.2
-    // slider → wind speed, in/s (max ≈ 2.5 m/s — a light indoor breeze)
-    const windSpeed = Math.pow(this.breeze, 1.5) * 100
+    // slider → wind speed, in/s, with a floor so the low end still breathes
+    const windSpeed = 6 + Math.pow(this.breeze, 1.2) * 110
     const windDir = t * 0.11 // wind direction slowly wanders around the room
     let i = 0
     for (const vis of this.visuals.values()) {
       if (!vis.body || vis.node.kind !== 'shape') continue
+      const body = vis.body
       i += 1
       const phase = i * 1.7
       // gusts with real lulls: mostly calm, occasional pushes
       const g = 0.5 + 0.5 * Math.sin(t * 0.31 + phase) * Math.sin(t * 0.13 + phase * 2.3)
       const gust = Math.max(0.08, g * g)
-      const v = windSpeed * gust
+      const w = windSpeed * gust
+      const wind = new CANNON.Vec3(Math.sin(windDir + phase * 0.15) * w, 0, Math.cos(windDir + phase * 0.15) * w)
+
+      const vrel = wind.vsub(body.velocity)
+      const speed = vrel.length()
+      if (speed < 1e-3) continue
+
+      // plate normal is the local z axis (shapes are extruded along z)
+      const normal = body.quaternion.vmult(new CANNON.Vec3(0, 0, 1))
+      const cosInc = Math.abs(vrel.dot(normal)) / speed
       const area = shapeArea(vis.node.shape, vis.node.width, vis.node.height)
-      const mag = 0.5 * AIR_OZ_IN3 * CD * area * v * v
-      const f = new CANNON.Vec3(Math.sin(windDir + phase * 0.15) * mag, 0, Math.cos(windDir + phase * 0.15) * mag)
-      // apply slightly off-center so shapes also twist and the mobile slowly rotates
-      const offset = vis.body.quaternion.vmult(new CANNON.Vec3(vis.node.width / 6, 0, 0))
-      vis.body.applyForce(f, vis.body.position.vadd(offset))
+      const effArea = area * (0.12 + 0.88 * cosInc) // a little residual drag even edge-on
+      const drag = 0.5 * AIR_OZ_IN3 * CD * effArea * speed // × vrel below → ∝ v²
+      const force = vrel.scale(drag)
+
+      // apply a touch downwind within the plate plane → weathervane feathering
+      const inPlane = vrel.vsub(normal.scale(vrel.dot(normal)))
+      const inPlaneLen = inPlane.length()
+      const at =
+        inPlaneLen > 1e-3
+          ? body.position.vadd(inPlane.scale((0.15 * vis.node.width) / inPlaneLen))
+          : body.position
+      body.applyForce(force, at)
+
+      // rotational drag: τ ∝ −ω|ω| · ρ A r³
+      const omega = body.angularVelocity
+      const spin = omega.length()
+      if (spin > 1e-4) {
+        const kr = 4 * AIR_OZ_IN3 * CD * area * Math.pow(vis.node.width / 2, 3)
+        body.applyTorque(omega.scale(-kr * spin))
+      }
     }
   }
 
