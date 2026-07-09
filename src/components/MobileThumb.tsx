@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { MobileDoc, MobileNode } from '../model/types'
+import { isFlat } from '../model/types'
 import { holePos, svgPath } from '../model/shapes'
 
 interface Line {
@@ -14,6 +15,8 @@ interface PlacedShape {
   color: string
   tx: number
   ty: number
+  /** flat pieces are seen edge-on in the diagram: squash them vertically */
+  squash?: number
 }
 
 /** Classic flat mobile diagram: every arm drawn in one plane, balanced level.
@@ -45,12 +48,28 @@ function flatLayout(doc: MobileDoc) {
     // bent-wire look: end loop up to the pivot loop and back down
     lines.push({ x1: lx, y1: y + h, x2: x, y2: y })
     lines.push({ x1: x, y1: y, x2: rx, y2: y + h })
-    lines.push({ x1: lx, y1: y + h, x2: lx, y2: y + h + node.dropLeft })
-    lines.push({ x1: rx, y1: y + h, x2: rx, y2: y + h + node.dropRight })
     grow(lx, y)
     grow(rx, y)
-    place(node.left, lx, y + h + node.dropLeft)
-    place(node.right, rx, y + h + node.dropRight)
+    for (const side of ['left', 'right'] as const) {
+      const child = side === 'left' ? node.left : node.right
+      const drop = side === 'left' ? node.dropLeft : node.dropRight
+      const ex = side === 'left' ? lx : rx
+      const dir = side === 'left' ? -1 : 1
+      if (isFlat(child) && child.kind === 'shape') {
+        // edge-on: a squashed profile riding on the end of the wire
+        shapes.push({
+          path: svgPath(child.shape, child.width, child.height),
+          color: child.color,
+          tx: ex + (dir * child.width) / 2,
+          ty: y + h - 0.15,
+          squash: 0.16,
+        })
+        grow(ex + dir * child.width, y + h)
+        continue
+      }
+      lines.push({ x1: ex, y1: y + h, x2: ex, y2: y + h + drop })
+      place(child, ex, y + h + drop)
+    }
   }
 
   lines.push({ x1: 0, y1: -doc.hangerDrop * 0.5, x2: 0, y2: 0 })
@@ -77,7 +96,14 @@ export function MobileThumb({ doc, width = 210, height = 120 }: { doc: MobileDoc
         <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} stroke="#55504a" strokeWidth={stroke} strokeLinecap="round" />
       ))}
       {layout.shapes.map((s, i) => (
-        <path key={i} d={s.path} transform={`translate(${s.tx} ${s.ty})`} fill={s.color} stroke="rgba(0,0,0,0.18)" strokeWidth={stroke / 2} />
+        <path
+          key={i}
+          d={s.path}
+          transform={`translate(${s.tx} ${s.ty})${s.squash ? ` scale(1 ${s.squash})` : ''}`}
+          fill={s.color}
+          stroke="rgba(0,0,0,0.18)"
+          strokeWidth={stroke / 2}
+        />
       ))}
     </svg>
   )

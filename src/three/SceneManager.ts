@@ -3,10 +3,10 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import * as CANNON from 'cannon-es'
 import type { ArmNode, MobileDoc, MobileNode, ShapeNode } from '../model/types'
-import { isArm } from '../model/types'
+import { isArm, isFlat } from '../model/types'
 import { computePose, shapeWeightOz } from '../model/balance'
 import type { Pose } from '../model/balance'
-import { WIRES } from '../model/materials'
+import { WIRES, flatGrooveLen } from '../model/materials'
 import { centroid, holePos, outline, shapeArea } from '../model/shapes'
 import { FLOOR_Y, buildRoom } from './room'
 import type { Room } from './room'
@@ -20,9 +20,11 @@ interface NodeVisual {
   group: THREE.Group
   body?: CANNON.Body
   meshes: THREE.Mesh[]
-  /** shapes only: true center of gravity in the group's local frame — the
-   *  physics body origin sits here rather than at the bounding-box center */
+  /** true center of gravity in the group's local frame — the physics body
+   *  origin sits here rather than at the group origin */
   com?: { x: number; y: number }
+  /** flat-mounted shapes: rigid attachment to the parent arm's group/body */
+  attach?: { armId: string; localPos: THREE.Vector3; localRot: THREE.Quaternion }
 }
 
 export class SceneManager {
@@ -328,7 +330,7 @@ export class SceneManager {
    *  shape: origin at the shape's center, outline in the local XY plane. */
   private buildNode(node: MobileNode, parent: ArmNode | null, side: 'left' | 'right'): void {
     if (node.kind === 'arm') this.buildArm(node)
-    else this.buildShape(node)
+    else this.buildShape(node, parent, side)
     if (node.kind === 'arm') {
       this.buildNode(node.left, node, 'left')
       this.buildNode(node.right, node, 'right')
@@ -341,6 +343,11 @@ export class SceneManager {
     const mat = this.wireMaterial(node.wire)
     const group = new THREE.Group()
     const meshes: THREE.Mesh[] = []
+
+    const flatSide = (side: 'left' | 'right') => {
+      const child = side === 'left' ? node.left : node.right
+      return isFlat(child) && child.kind === 'shape' ? child : null
+    }
 
     // gently arced rod passing from end loop up over the pivot loop
     const px = node.pivot - L / 2
@@ -359,13 +366,25 @@ export class SceneManager {
     group.add(rod)
     meshes.push(rod)
 
-    // loops: pivot + both ends + drop wires with their bottom loops
+    // loops: pivot + hanging ends with drop wires; flat ends get the groove
+    // extension that runs under the piece instead
     const loopGeo = this.track(new THREE.TorusGeometry(0.16, 0.045, 8, 16))
     const pivotLoop = new THREE.Mesh(loopGeo, mat)
     pivotLoop.position.set(px, node.pivotHeight + 0.16, 0)
     group.add(pivotLoop)
 
     for (const s of [-1, 1] as const) {
+      const side = s === -1 ? 'left' : 'right'
+      const flat = flatSide(side)
+      if (flat) {
+        const groove = flatGrooveLen(flat.width)
+        const ext = new THREE.Mesh(this.track(new THREE.CylinderGeometry(0.05, 0.05, groove, 8)), mat)
+        ext.rotation.z = Math.PI / 2
+        ext.position.set(s * (L / 2 + groove / 2), 0, 0)
+        ext.castShadow = true
+        group.add(ext)
+        continue
+      }
       const drop = s === -1 ? node.dropLeft : node.dropRight
       const endLoop = new THREE.Mesh(loopGeo, mat)
       endLoop.position.set((s * L) / 2, -0.1, 0)
@@ -384,21 +403,69 @@ export class SceneManager {
 
     if (this.world) {
       const ozPerIn = WIRES[node.wire].ozPerIn
-      const mass = Math.max(ozPerIn * (L + node.dropLeft + node.dropRight), 0.12)
-      const body = new CANNON.Body({ mass })
-      body.addShape(new CANNON.Box(new CANNON.Vec3(L / 2, 0.06, 0.06)))
-      body.addShape(new CANNON.Box(new CANNON.Vec3(0.05, node.dropLeft / 2, 0.05)), new CANNON.Vec3(-L / 2, -node.dropLeft / 2, 0))
-      body.addShape(new CANNON.Box(new CANNON.Vec3(0.05, node.dropRight / 2, 0.05)), new CANNON.Vec3(L / 2, -node.dropRight / 2, 0))
+      // gather every rigid mass on this arm (wire, drops, flat pieces) so the
+      // body origin can sit at the true center of mass — otherwise gravity
+      // torques about the pivot come out wrong in the simulation
+      interface Part {
+        mass: number
+        pos: CANNON.Vec3 // in hang-line-center coordinates
+        half: CANNON.Vec3
+        comPos?: CANNON.Vec3 // where the mass truly acts, if not the box center
+      }
+      const parts: Part[] = [{ mass: ozPerIn * L, pos: new CANNON.Vec3(0, 0, 0), half: new CANNON.Vec3(L / 2, 0.06, 0.06) }]
+      for (const s of [-1, 1] as const) {
+        const side = s === -1 ? 'left' : 'right'
+        const flat = flatSide(side)
+        if (flat) {
+          const groove = flatGrooveLen(flat.width)
+          parts.push({
+            mass: ozPerIn * groove,
+            pos: new CANNON.Vec3(s * (L / 2 + groove / 2), 0, 0),
+            half: new CANNON.Vec3(groove / 2, 0.05, 0.05),
+          })
+          const c = centroid(flat.shape, flat.width, flat.height)
+          const center = new CANNON.Vec3(s * (L / 2 + flat.width / 2), 0.12 + flat.thickness / 2, 0)
+          parts.push({
+            mass: Math.max(shapeWeightOz(flat), 0.05),
+            pos: center,
+            half: new CANNON.Vec3(flat.width / 2, Math.max(flat.thickness / 2, 0.05), flat.height / 2),
+            comPos: new CANNON.Vec3(center.x + s * c.x, center.y, center.z),
+          })
+        } else {
+          const drop = s === -1 ? node.dropLeft : node.dropRight
+          parts.push({
+            mass: ozPerIn * drop,
+            pos: new CANNON.Vec3((s * L) / 2, -drop / 2, 0),
+            half: new CANNON.Vec3(0.05, drop / 2, 0.05),
+          })
+        }
+      }
+      const massTotal = Math.max(
+        parts.reduce((sum, p) => sum + p.mass, 0),
+        0.12,
+      )
+      const com = new CANNON.Vec3(0, 0, 0)
+      for (const p of parts) {
+        const at = p.comPos ?? p.pos
+        com.x += (at.x * p.mass) / massTotal
+        com.y += (at.y * p.mass) / massTotal
+        com.z += (at.z * p.mass) / massTotal
+      }
+      const body = new CANNON.Body({ mass: massTotal })
+      for (const p of parts) {
+        body.addShape(new CANNON.Box(p.half), p.pos.vsub(com))
+      }
       body.linearDamping = 0.15
       body.angularDamping = 0.25
       body.collisionFilterMask = 0
       this.world.addBody(body)
       vis.body = body
+      vis.com = { x: com.x, y: com.y }
     }
     this.visuals.set(node.id, vis)
   }
 
-  private buildShape(node: ShapeNode): void {
+  private buildShape(node: ShapeNode, parent: ArmNode | null, side: 'left' | 'right'): void {
     const pts = outline(node.shape, node.width, node.height)
     const shape2d = new THREE.Shape(pts.map((p) => new THREE.Vector2(p.x, p.y)))
     const geo = this.track(
@@ -412,6 +479,21 @@ export class SceneManager {
     group.add(mesh)
     this.mobileRoot.add(group)
     const vis: NodeVisual = { node, group, meshes: [mesh] }
+
+    if (isFlat(node) && parent) {
+      // rigid with the parent arm: the mass and physics live in the arm body;
+      // this visual just follows it at a fixed local offset
+      const s = side === 'left' ? -1 : 1
+      const localPos = new THREE.Vector3(s * (parent.length / 2 + node.width / 2), 0.12 + node.thickness / 2, 0)
+      const localRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2)
+      if (s === -1) {
+        // mirror so the piece's local +x points outward on the left side too
+        localRot.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI))
+      }
+      vis.attach = { armId: parent.id, localPos, localRot }
+      this.visuals.set(node.id, vis)
+      return
+    }
 
     if (this.world) {
       const c = centroid(node.shape, node.width, node.height)
@@ -433,29 +515,34 @@ export class SceneManager {
   }
 
   /** PointToPoint constraints matching the render geometry: the joint sits at
-   *  the bottom loop of the parent's drop wire = the child's top loop. */
+   *  the bottom loop of the parent's drop wire = the child's top loop.
+   *  Flat-mounted shapes are rigid with their arm's body — no constraint. */
   private connectToParent(node: MobileNode, parent: ArmNode | null, side: 'left' | 'right'): void {
     if (!this.world) return
-    const childBody = this.visuals.get(node.id)?.body
+    if (isFlat(node)) return
+    const childVis = this.visuals.get(node.id)
+    const childBody = childVis?.body
     if (!childBody) return
 
+    // anchors are body-local, and bodies sit at their center of mass
+    const childCom = childVis?.com ?? { x: 0, y: 0 }
     const childAnchor =
       node.kind === 'arm'
-        ? new CANNON.Vec3(node.pivot - node.length / 2, node.pivotHeight, 0)
+        ? new CANNON.Vec3(node.pivot - node.length / 2 - childCom.x, node.pivotHeight - childCom.y, 0)
         : (() => {
-            // shape body origin sits at the centroid, so express the hole there
             const hole = holePos(node.shape, node.width, node.height)
-            const c = centroid(node.shape, node.width, node.height)
-            return new CANNON.Vec3(hole.x - c.x, hole.y - c.y, 0)
+            return new CANNON.Vec3(hole.x - childCom.x, hole.y - childCom.y, 0)
           })()
 
     let parentBody: CANNON.Body | null
     let parentAnchor: CANNON.Vec3
     if (parent) {
-      parentBody = this.visuals.get(parent.id)?.body ?? null
+      const parentVis = this.visuals.get(parent.id)
+      parentBody = parentVis?.body ?? null
+      const parentCom = parentVis?.com ?? { x: 0, y: 0 }
       const drop = side === 'left' ? parent.dropLeft : parent.dropRight
       const sx = side === 'left' ? -1 : 1
-      parentAnchor = new CANNON.Vec3((sx * parent.length) / 2, -drop, 0)
+      parentAnchor = new CANNON.Vec3((sx * parent.length) / 2 - parentCom.x, -drop - parentCom.y, 0)
     } else {
       parentBody = this.hangerBody
       parentAnchor = new CANNON.Vec3(0, -(this.doc?.hangerDrop ?? 0) / 2, 0)
@@ -492,6 +579,13 @@ export class SceneManager {
           (p.leftEndW.y + p.rightEndW.y) / 2,
           (p.leftEndW.z + p.rightEndW.z) / 2,
         )
+      } else if (vis.attach) {
+        // rigid with the arm: derive from the arm group, which insertion
+        // order guarantees was posed earlier in this same pass
+        const armVis = this.visuals.get(vis.attach.armId)
+        if (!armVis) continue
+        q.copy(armVis.group.quaternion).multiply(vis.attach.localRot)
+        pos.copy(vis.attach.localPos).applyQuaternion(armVis.group.quaternion).add(armVis.group.position)
       } else {
         const p = this.pose.shapes.get(vis.node.id)
         if (!p) continue
@@ -501,7 +595,7 @@ export class SceneManager {
       vis.group.position.copy(pos)
       vis.group.quaternion.copy(q)
       if (vis.body) {
-        // shape bodies live at the centroid, offset from the group origin
+        // bodies live at their center of mass, offset from the group origin
         const bodyPos = vis.com ? pos.clone().add(new THREE.Vector3(vis.com.x, vis.com.y, 0).applyQuaternion(q)) : pos
         vis.body.position.set(bodyPos.x, bodyPos.y, bodyPos.z)
         vis.body.quaternion.set(q.x, q.y, q.z, q.w)
@@ -509,7 +603,6 @@ export class SceneManager {
         vis.body.angularVelocity.setZero()
       }
     }
-
   }
 
   private frameCameraIfNeeded(): void {
@@ -572,20 +665,22 @@ export class SceneManager {
 
     if (this.mode === 'test' && hitId && this.world) {
       const vis = this.visuals.get(hitId)
-      if (!vis?.body) return
+      // flat pieces are rigid with their arm — dragging one drags the arm
+      const grabBody = vis?.body ?? (vis?.attach ? this.visuals.get(vis.attach.armId)?.body : undefined)
+      if (!vis || !grabBody) return
       const hitPoint = hits[0].point
       this.dragPlane.setFromNormalAndCoplanarPoint(this.camera.getWorldDirection(new THREE.Vector3()).negate(), hitPoint)
       this.dragBody = new CANNON.Body({ mass: 0 })
       this.dragBody.position.set(hitPoint.x, hitPoint.y, hitPoint.z)
       this.dragBody.collisionFilterMask = 0
       this.world.addBody(this.dragBody)
-      const local = vis.body.pointToLocalFrame(new CANNON.Vec3(hitPoint.x, hitPoint.y, hitPoint.z))
+      const local = grabBody.pointToLocalFrame(new CANNON.Vec3(hitPoint.x, hitPoint.y, hitPoint.z))
       this.dragConstraint = new CANNON.PointToPointConstraint(
-        vis.body,
+        grabBody,
         local,
         this.dragBody,
         new CANNON.Vec3(0, 0, 0),
-        vis.body.mass * GRAVITY_IN_S2 * 8,
+        grabBody.mass * GRAVITY_IN_S2 * 8,
       )
       this.world.addConstraint(this.dragConstraint)
       this.controls.enabled = false
@@ -699,11 +794,19 @@ export class SceneManager {
       this.applyBreeze(this.clock.elapsedTime)
       this.world.step(1 / 120, dt, 10)
       for (const vis of this.visuals.values()) {
+        if (vis.attach) {
+          // rigid with the arm, whose group was synced earlier in this pass
+          const armVis = this.visuals.get(vis.attach.armId)
+          if (!armVis) continue
+          vis.group.quaternion.copy(armVis.group.quaternion).multiply(vis.attach.localRot)
+          vis.group.position.copy(vis.attach.localPos).applyQuaternion(armVis.group.quaternion).add(armVis.group.position)
+          continue
+        }
         if (!vis.body) continue
         const b = vis.body
         vis.group.quaternion.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w)
         if (vis.com) {
-          // body origin is the centroid; shift back to the group's bbox-center origin
+          // body origin is the center of mass; shift back to the group origin
           const off = b.quaternion.vmult(new CANNON.Vec3(-vis.com.x, -vis.com.y, 0))
           vis.group.position.set(b.position.x + off.x, b.position.y + off.y, b.position.z + off.z)
         } else {

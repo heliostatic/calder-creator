@@ -6,6 +6,10 @@ function shape(kind: ShapeKind, width: number, height: number, color: string, wo
   return { kind: 'shape', id: newId(), shape: kind, width, height, wood, thickness, color }
 }
 
+function flat(kind: ShapeKind, width: number, height: number, color: string, wood: WoodKey = 'balticBirch', thickness = 0.125): ShapeNode {
+  return { ...shape(kind, width, height, color, wood, thickness), mount: 'flat' }
+}
+
 function arm(
   length: number,
   left: MobileNode,
@@ -39,7 +43,7 @@ const WHITE = '#f4efe6'
 const ORANGE = '#e87722'
 const WOODTONE = '#7a5230'
 
-export type FamilyKey = 'starter' | 'cascade' | 'counterweight' | 'tree' | 'constellation'
+export type FamilyKey = 'starter' | 'cascade' | 'counterweight' | 'tree' | 'constellation' | 'floating'
 
 export interface FamilyInfo {
   key: FamilyKey
@@ -78,6 +82,12 @@ export const FAMILIES: FamilyInfo[] = [
     key: 'constellation',
     title: 'Constellations',
     blurb: 'Many small shapes on long thin wires — airy, star-field mobiles that never stop drifting.',
+    archiveUrl: 'https://calder.org/archive/all/works/hanging-mobile/',
+  },
+  {
+    key: 'floating',
+    title: 'Floating planes',
+    blurb: 'Shapes riveted flat on the wire itself — layered horizontal discs that glide instead of swing.',
     archiveUrl: 'https://calder.org/archive/all/works/hanging-mobile/',
   },
 ]
@@ -405,6 +415,57 @@ export const TEMPLATES: TemplateEntry[] = [
       ),
   },
 ]
+
+// register the floating-planes designs
+TEMPLATES.push(
+  {
+    key: 'lilyPads',
+    title: 'Lily Pads',
+    family: 'floating',
+    blurb: 'Flat discs stepping down a cascade — they hover and turn like leaves on a pond.',
+    make: () =>
+      doc(
+        'Lily Pads',
+        arm(
+          16,
+          flat('circle', 5, 5, '#0057b8', 'balticBirch', 0.25),
+          arm(
+            12,
+            flat('circle', 4, 4, '#f4efe6', 'balticBirch', 0.25),
+            arm(9, flat('circle', 3.25, 3.25, '#ffc907', 'balticBirch', 0.25), flat('circle', 2.5, 2.5, '#c8202f', 'balticBirch', 0.25), {
+              dropLeft: 2,
+              dropRight: 2,
+            }),
+            { dropLeft: 2.5, dropRight: 3 },
+          ),
+          { dropLeft: 3, dropRight: 4, wire: 'steel332' },
+        ),
+        8,
+      ),
+  },
+  {
+    key: 'waterGarden',
+    title: 'Water Garden',
+    family: 'floating',
+    blurb: 'Flat pads up top, a petal and a little moon swinging below — two kinds of motion at once.',
+    make: () =>
+      doc(
+        'Water Garden',
+        arm(
+          18,
+          flat('blob', 5.5, 4.25, '#0057b8', 'balticBirch', 0.25),
+          arm(
+            12,
+            flat('circle', 3.75, 3.75, '#f4efe6', 'balticBirch', 0.25),
+            arm(8, shape('petal', 2.5, 4, '#c8202f'), shape('crescent', 2.75, 2.75, '#ffc907'), { dropLeft: 1.75, dropRight: 2.5 }),
+            { dropLeft: 2.5, dropRight: 3.5 },
+          ),
+          { dropLeft: 3, dropRight: 4, wire: 'steel332' },
+        ),
+        8,
+      ),
+  },
+)
 
 export function blankDoc(): MobileDoc {
   return doc('My Mobile', arm(12, shape('circle', 4, 4, RED), shape('petal', 3, 4.5, BLUE)))

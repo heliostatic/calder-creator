@@ -195,6 +195,14 @@ function distToOutline(pts: Pt[], x: number, y: number): number {
   return Math.sqrt(best)
 }
 
+/** Distance from (x,y) to the outline, positive inside the material and
+ *  negative outside — used to validate hole and groove placement. */
+export function materialClearance(kind: ShapeKind, w: number, h: number, x: number, y: number): number {
+  const pts = outline(kind, w, h)
+  const d = distToOutline(pts, x, y)
+  return pointInPolygon(pts, x, y) ? d : -d
+}
+
 const holeCache = new Map<string, Pt>()
 
 /** Where the hanging hole gets drilled: the highest spot that (a) keeps a safe

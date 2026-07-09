@@ -1,5 +1,5 @@
 import type { ArmNode, ShapeKind, ShapeNode, WireKey, WoodKey } from '../model/types'
-import { findNode, labelNodes, walk } from '../model/types'
+import { findNode, isFlat, labelNodes, walk } from '../model/types'
 import { useStore } from '../state/store'
 import { COLORS, THICKNESSES, WIRES, WOODS, fmtIn, fmtOz } from '../model/materials'
 import { armLoads, armTiltRad, balancedPivot, shapeWeightOz, subtreeWeightOz } from '../model/balance'
@@ -179,7 +179,17 @@ function ShapeEditor({ node }: { node: ShapeNode }) {
           <button
             key={k}
             className={`shape-kind ${node.shape === k ? 'selected' : ''}`}
-            onClick={() => updateNode(node.id, { shape: k })}
+            onClick={() =>
+              updateNode(
+                node.id,
+                k === 'circle'
+                  ? { shape: k, height: node.width }
+                  : k === 'oval' && Math.abs(node.width - node.height) < 0.25
+                    ? // an oval that matches its width is just a circle — give it a real aspect
+                      { shape: k, height: Math.max(1, Math.round(node.width * 0.65 * 4) / 4) }
+                    : { shape: k },
+              )
+            }
             title={SHAPE_LABELS[k]}
           >
             <ShapeThumb kind={k} color={node.color} size={34} />
@@ -187,6 +197,27 @@ function ShapeEditor({ node }: { node: ShapeNode }) {
           </button>
         ))}
       </div>
+      {!isOnlyNode && (
+        <Field label="How it sits">
+          <div className="mount-toggle">
+            <button
+              className={`btn small ${(node.mount ?? 'hanging') === 'hanging' ? 'primary' : ''}`}
+              onClick={() => updateNode(node.id, { mount: 'hanging' })}
+            >
+              ⤵ Hanging
+            </button>
+            <button
+              className={`btn small ${node.mount === 'flat' ? 'primary' : ''}`}
+              onClick={() => updateNode(node.id, { mount: 'flat' })}
+            >
+              ⬤ Lying flat
+            </button>
+          </div>
+          {node.mount === 'flat' && (
+            <small className="hint">Rides flat on the wire itself, like Calder's floating discs — no drop wire.</small>
+          )}
+        </Field>
+      )}
       <SliderField
         label="Width"
         value={node.width}
@@ -279,24 +310,28 @@ function ArmEditor({ node }: { node: ArmNode }) {
         format={fmtIn}
         onChange={(v) => updateNode(node.id, { length: v, pivot: Math.min(node.pivot, v) })}
       />
-      <SliderField
-        label="Left drop wire"
-        value={node.dropLeft}
-        min={0.5}
-        max={8}
-        step={0.25}
-        format={fmtIn}
-        onChange={(v) => updateNode(node.id, { dropLeft: v })}
-      />
-      <SliderField
-        label="Right drop wire"
-        value={node.dropRight}
-        min={0.5}
-        max={8}
-        step={0.25}
-        format={fmtIn}
-        onChange={(v) => updateNode(node.id, { dropRight: v })}
-      />
+      {!isFlat(node.left) && (
+        <SliderField
+          label="Left drop wire"
+          value={node.dropLeft}
+          min={0.5}
+          max={8}
+          step={0.25}
+          format={fmtIn}
+          onChange={(v) => updateNode(node.id, { dropLeft: v })}
+        />
+      )}
+      {!isFlat(node.right) && (
+        <SliderField
+          label="Right drop wire"
+          value={node.dropRight}
+          min={0.5}
+          max={8}
+          step={0.25}
+          format={fmtIn}
+          onChange={(v) => updateNode(node.id, { dropRight: v })}
+        />
+      )}
       <Field label="Wire">
         <select value={node.wire} onChange={(e) => updateNode(node.id, { wire: e.target.value as WireKey })}>
           {Object.entries(WIRES).map(([k, w]) => (

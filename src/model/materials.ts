@@ -32,6 +32,24 @@ export const LOOP_ALLOWANCE_IN = 1.25
 /** Hole is drilled this far below the topmost point of a shape. */
 export const HOLE_INSET_IN = 0.35
 
+/** Flat-mounted shapes: the arm wire runs this far under the piece, epoxied
+ *  into a shallow groove on the underside (capped at half the piece width). */
+export const FLAT_GROOVE_IN = 1.5
+
+export function flatGrooveLen(widthIn: number): number {
+  return Math.min(FLAT_GROOVE_IN, widthIn / 2)
+}
+
+/** Practical load ceiling per wire before it sags or kinks, ounces.
+ *  Rules of thumb from mobile-making guides (e.g. marcomahler.com). */
+export const WIRE_LOAD_LIMIT_OZ: Record<WireKey, number> = {
+  steel16: 12,
+  steel332: 40,
+  steel18: 120,
+  brass16: 10,
+  brass332: 32,
+}
+
 // Calder's palette
 export const COLORS: { value: string; label: string }[] = [
   { value: '#c8202f', label: 'Calder red' },

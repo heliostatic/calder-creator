@@ -19,6 +19,14 @@ export interface ShapeNode {
   thickness: number
   /** paint color, hex */
   color: string
+  /** how the piece attaches to its arm: hanging from a drop wire (default),
+   *  or lying flat, riveted horizontally on the wire itself — the Calder
+   *  "floating disc" style. Absent means hanging (older saved files). */
+  mount?: 'hanging' | 'flat'
+}
+
+export function isFlat(n: MobileNode): boolean {
+  return n.kind === 'shape' && n.mount === 'flat'
 }
 
 export interface ArmNode {

@@ -1,7 +1,7 @@
 import type { ArmNode, MobileDoc, MobileNode } from './types'
-import { mapTree } from './types'
-import { WIRES, WOODS } from './materials'
-import { holePos, shapeArea } from './shapes'
+import { isFlat, mapTree } from './types'
+import { WIRES, WOODS, flatGrooveLen } from './materials'
+import { centroid, holePos, shapeArea } from './shapes'
 
 export interface V3 {
   x: number
@@ -15,19 +15,58 @@ export function shapeWeightOz(n: Extract<MobileNode, { kind: 'shape' }>): number
 }
 
 /** Weight of an entire subtree including its wire, ounces.
- *  (What a drop wire above this node has to carry.) */
+ *  (What the wire above this node has to carry.) */
 export function subtreeWeightOz(node: MobileNode): number {
   if (node.kind === 'shape') return shapeWeightOz(node)
   const w = WIRES[node.wire].ozPerIn
-  return (
-    w * node.length +
-    w * node.dropLeft + subtreeWeightOz(node.left) +
-    w * node.dropRight + subtreeWeightOz(node.right)
-  )
+  return w * node.length + sideWeightOz(node, 'left') + sideWeightOz(node, 'right')
+}
+
+/** Everything carried past one end of an arm: the child subtree plus the
+ *  drop wire (hanging) or the groove extension of the arm wire (flat). */
+function sideWeightOz(arm: ArmNode, side: 'left' | 'right'): number {
+  const child = side === 'left' ? arm.left : arm.right
+  const drop = side === 'left' ? arm.dropLeft : arm.dropRight
+  const w = WIRES[arm.wire].ozPerIn
+  if (isFlat(child) && child.kind === 'shape') {
+    return shapeWeightOz(child) + w * flatGrooveLen(child.width)
+  }
+  return w * drop + subtreeWeightOz(child)
+}
+
+/** A weight and where it acts along the arm (inches from the left end loop —
+ *  flat-mounted pieces act BEYOND the ends, which lengthens their lever). */
+export interface ArmPointLoad {
+  W: number
+  x: number
+}
+
+/** All the loads an arm carries, as (weight, position) pairs. */
+export function armPointLoads(arm: ArmNode): ArmPointLoad[] {
+  const w = WIRES[arm.wire].ozPerIn
+  const loads: ArmPointLoad[] = [{ W: w * arm.length, x: arm.length / 2 }]
+  for (const side of ['left', 'right'] as const) {
+    const child = side === 'left' ? arm.left : arm.right
+    const drop = side === 'left' ? arm.dropLeft : arm.dropRight
+    const end = side === 'left' ? 0 : arm.length
+    const dir = side === 'left' ? -1 : 1
+    if (isFlat(child) && child.kind === 'shape') {
+      // the piece lies flat just past the end: its near edge at the end loop
+      // position, its local +x pointing outward, so its weight acts at
+      // end + (half width + centroid offset) along the outward direction
+      const c = centroid(child.shape, child.width, child.height)
+      const groove = flatGrooveLen(child.width)
+      loads.push({ W: shapeWeightOz(child), x: end + dir * (child.width / 2 + c.x) })
+      loads.push({ W: w * groove, x: end + (dir * groove) / 2 })
+    } else {
+      loads.push({ W: w * drop + subtreeWeightOz(child), x: end })
+    }
+  }
+  return loads
 }
 
 export interface ArmLoads {
-  /** hanging on the left end loop: left drop wire + left subtree */
+  /** carried past the left end: drop wire + subtree, or the flat piece */
   WL: number
   WR: number
   /** the arm wire itself */
@@ -36,18 +75,19 @@ export interface ArmLoads {
 }
 
 export function armLoads(arm: ArmNode): ArmLoads {
-  const w = WIRES[arm.wire].ozPerIn
-  const WL = w * arm.dropLeft + subtreeWeightOz(arm.left)
-  const WR = w * arm.dropRight + subtreeWeightOz(arm.right)
-  const Warm = w * arm.length
+  const WL = sideWeightOz(arm, 'left')
+  const WR = sideWeightOz(arm, 'right')
+  const Warm = WIRES[arm.wire].ozPerIn * arm.length
   return { WL, WR, Warm, Wtot: WL + WR + Warm }
 }
 
-/** Pivot position (inches from the left end loop) that makes the arm hang level. */
+/** Pivot position (inches from the left end loop) that makes the arm hang
+ *  level: the weighted centroid of all its point loads. */
 export function balancedPivot(arm: ArmNode): number {
-  const { WL, WR, Warm, Wtot } = armLoads(arm)
+  const loads = armPointLoads(arm)
+  const Wtot = loads.reduce((s, l) => s + l.W, 0)
   if (Wtot <= 0) return arm.length / 2
-  return (WR * arm.length + Warm * (arm.length / 2)) / (WL + WR + Warm)
+  return loads.reduce((s, l) => s + l.W * l.x, 0) / Wtot
 }
 
 /** Equilibrium tilt of the arm, radians. Positive = left end hangs lower.
@@ -56,10 +96,11 @@ export function balancedPivot(arm: ArmNode): number {
  *  line between the end loops: tan θ = ΣWᵢ(p − xᵢ) / (h · ΣWᵢ)
  */
 export function armTiltRad(arm: ArmNode): number {
-  const { WL, WR, Warm, Wtot } = armLoads(arm)
-  const M = WL * arm.pivot + Warm * (arm.pivot - arm.length / 2) - WR * (arm.length - arm.pivot)
+  const loads = armPointLoads(arm)
+  const Wtot = loads.reduce((s, l) => s + l.W, 0)
+  const M = loads.reduce((s, l) => s + l.W * (arm.pivot - l.x), 0)
   const h = Math.max(arm.pivotHeight, 0.01)
-  return Math.atan2(M, h * Wtot)
+  return Math.atan2(M, h * Math.max(Wtot, 1e-9))
 }
 
 /** Return a copy of the doc with every arm's pivot moved to its balance point. */
@@ -91,10 +132,13 @@ export interface ArmPose {
 
 export interface ShapePose {
   kind: 'shape'
-  /** world position of the drilled hole */
+  /** world position of the drilled hole (hanging) or the arm end (flat) */
   holeW: V3
   centerW: V3
   yawRad: number
+  /** present when the piece lies flat, rigid with its arm: the arm's yaw and
+   *  tilt plus which way the piece points (+1 = along the arm's +x) */
+  flat?: { armYaw: number; armTilt: number; dir: 1 | -1 }
 }
 
 export interface Pose {
@@ -117,7 +161,14 @@ interface Placed {
   halfH: number
 }
 
-function armEnds(node: ArmNode, hangW: V3, yaw: number): { leftEndW: V3; rightEndW: V3; tilt: number } {
+interface ArmFrame {
+  leftEndW: V3
+  rightEndW: V3
+  tilt: number
+  toWorld: (lx: number, ly: number) => V3
+}
+
+function armFrame(node: ArmNode, hangW: V3, yaw: number): ArmFrame {
   const tilt = armTiltRad(node)
   const cosT = Math.cos(tilt)
   const sinT = Math.sin(tilt)
@@ -130,7 +181,15 @@ function armEnds(node: ArmNode, hangW: V3, yaw: number): { leftEndW: V3; rightEn
     const dy = u * sinT + vv * cosT
     return v3(hangW.x + dAlong * Math.cos(yaw), hangW.y + dy, hangW.z - dAlong * Math.sin(yaw))
   }
-  return { leftEndW: toWorld(0, 0), rightEndW: toWorld(node.length, 0), tilt }
+  return { leftEndW: toWorld(0, 0), rightEndW: toWorld(node.length, 0), tilt, toWorld }
+}
+
+/** Where a flat-mounted piece's bbox center sits, in its arm's frame:
+ *  near edge at the end loop position, resting just on top of the wire. */
+function flatCenterLocal(arm: ArmNode, child: Extract<MobileNode, { kind: 'shape' }>, side: 'left' | 'right'): { lx: number; ly: number } {
+  const end = side === 'left' ? 0 : arm.length
+  const dir = side === 'left' ? -1 : 1
+  return { lx: end + (dir * child.width) / 2, ly: 0.12 + child.thickness / 2 }
 }
 
 function shapeFootprint(node: Extract<MobileNode, { kind: 'shape' }>, hangW: V3, yaw: number): { centerW: V3; placed: Placed } {
@@ -164,10 +223,21 @@ function collectFootprints(node: MobileNode, hangW: V3, yaw: number, depth: numb
     out.push(shapeFootprint(node, hangW, yaw).placed)
     return
   }
-  const { leftEndW, rightEndW } = armEnds(node, hangW, yaw)
+  const frame = armFrame(node, hangW, yaw)
   const spread = 0.95 - depth * 0.12
-  collectFootprints(node.left, v3(leftEndW.x, leftEndW.y - node.dropLeft, leftEndW.z), yaw + spread, depth + 1, out)
-  collectFootprints(node.right, v3(rightEndW.x, rightEndW.y - node.dropRight, rightEndW.z), yaw - spread, depth + 1, out)
+  for (const side of ['left', 'right'] as const) {
+    const child = side === 'left' ? node.left : node.right
+    const drop = side === 'left' ? node.dropLeft : node.dropRight
+    const endW = side === 'left' ? frame.leftEndW : frame.rightEndW
+    if (isFlat(child) && child.kind === 'shape') {
+      const { lx, ly } = flatCenterLocal(node, child, side)
+      const c = frame.toWorld(lx, ly)
+      out.push({ x: c.x, y: c.y, z: c.z, r: Math.max(child.width, child.height) / 2, halfH: 0.6 })
+    } else {
+      const hang = v3(endW.x, endW.y - drop, endW.z)
+      collectFootprints(child, hang, yaw + (side === 'left' ? spread : -spread), depth + 1, out)
+    }
+  }
 }
 
 const YAW_CANDIDATES = [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, Math.PI / 2]
@@ -222,17 +292,43 @@ export function computePose(doc: MobileDoc): Pose {
       return
     }
 
-    const { leftEndW, rightEndW, tilt } = armEnds(node, hangW, yaw)
-    pose.arms.set(node.id, { kind: 'arm', pivotW: hangW, leftEndW, rightEndW, tiltRad: tilt, yawRad: yaw })
-    grow(leftEndW)
-    grow(rightEndW)
+    const frame = armFrame(node, hangW, yaw)
+    pose.arms.set(node.id, {
+      kind: 'arm',
+      pivotW: hangW,
+      leftEndW: frame.leftEndW,
+      rightEndW: frame.rightEndW,
+      tiltRad: frame.tilt,
+      yawRad: yaw,
+    })
+    grow(frame.leftEndW)
+    grow(frame.rightEndW)
 
-    // children hang plumb below the end loops on their drop wires
+    // flat pieces ride rigidly on the arm; hanging children get drop wires
     const spread = 0.95 - depth * 0.12
-    const leftHang = v3(leftEndW.x, leftEndW.y - node.dropLeft, leftEndW.z)
-    place(node.left, leftHang, bestYaw(node.left, leftHang, yaw + spread, depth + 1), depth + 1)
-    const rightHang = v3(rightEndW.x, rightEndW.y - node.dropRight, rightEndW.z)
-    place(node.right, rightHang, bestYaw(node.right, rightHang, yaw - spread, depth + 1), depth + 1)
+    for (const side of ['left', 'right'] as const) {
+      const child = side === 'left' ? node.left : node.right
+      const drop = side === 'left' ? node.dropLeft : node.dropRight
+      const endW = side === 'left' ? frame.leftEndW : frame.rightEndW
+      if (isFlat(child) && child.kind === 'shape') {
+        const dir = side === 'left' ? (-1 as const) : (1 as const)
+        const { lx, ly } = flatCenterLocal(node, child, side)
+        const centerW = frame.toWorld(lx, ly)
+        pose.shapes.set(child.id, {
+          kind: 'shape',
+          holeW: endW,
+          centerW,
+          yawRad: yaw,
+          flat: { armYaw: yaw, armTilt: frame.tilt, dir },
+        })
+        placed.push({ x: centerW.x, y: centerW.y, z: centerW.z, r: Math.max(child.width, child.height) / 2, halfH: 0.6 })
+        grow(centerW, Math.max(child.width, child.height) / 2)
+      } else {
+        const hang = v3(endW.x, endW.y - drop, endW.z)
+        const childYaw = bestYaw(child, hang, yaw + (side === 'left' ? spread : -spread), depth + 1)
+        place(child, hang, childYaw, depth + 1)
+      }
+    }
   }
 
   const rootHang = v3(0, -doc.hangerDrop, 0)

@@ -1,18 +1,21 @@
 import type { ArmNode, MobileDoc, ShapeNode } from './types'
-import { isArm, labelNodes, walk } from './types'
-import { LOOP_ALLOWANCE_IN, WIRES, WOODS } from './materials'
+import { isArm, isFlat, labelNodes, walk } from './types'
+import { LOOP_ALLOWANCE_IN, WIRES, WOODS, flatGrooveLen } from './materials'
 import { armLoads, armTiltRad, computePose, shapeWeightOz, subtreeWeightOz } from './balance'
 
 export interface PlanShape {
   node: ShapeNode
   label: string
   weightOz: number
+  /** lies flat on the wire: template gets a groove line instead of a drill hole */
+  flat: boolean
+  grooveLenIn: number
 }
 
 export interface PlanArmWire {
   node: ArmNode
   label: string
-  /** total wire to cut for this arm, including loop allowances */
+  /** total wire to cut for this arm, including loop and groove allowances */
   cutLenIn: number
   /** where to bend the pivot loop, measured from the finished left end loop */
   balanceFromLeftIn: number
@@ -20,6 +23,9 @@ export interface PlanArmWire {
   /** labels of what hangs on each end */
   leftChildLabel: string
   rightChildLabel: string
+  /** flat-mounted piece on this end (no loop — the wire runs under it) */
+  leftFlat: boolean
+  rightFlat: boolean
   loadOz: number
 }
 
@@ -69,19 +75,32 @@ export function buildPlan(doc: MobileDoc): Plan {
 
   walk(doc.root, (n) => {
     if (n.kind === 'shape') {
-      shapes.push({ node: n, label: labels.get(n.id) ?? '?', weightOz: shapeWeightOz(n) })
+      shapes.push({
+        node: n,
+        label: labels.get(n.id) ?? '?',
+        weightOz: shapeWeightOz(n),
+        flat: isFlat(n),
+        grooveLenIn: flatGrooveLen(n.width),
+      })
       return
     }
     const loads = armLoads(n)
+    const leftFlat = isFlat(n.left)
+    const rightFlat = isFlat(n.right)
+    // each hanging end gets a loop; each flat end gets the groove run under
+    // the piece plus a short tail; the pivot loop is bent from the same piece
+    const endAllowance = (flat: boolean, child: typeof n.left) =>
+      flat && child.kind === 'shape' ? flatGrooveLen(child.width) + 0.25 : LOOP_ALLOWANCE_IN
     arms.push({
       node: n,
       label: labels.get(n.id) ?? '?',
-      // two end loops + the pivot loop bent from the same piece
-      cutLenIn: n.length + 2 * LOOP_ALLOWANCE_IN + LOOP_ALLOWANCE_IN,
+      cutLenIn: n.length + endAllowance(leftFlat, n.left) + endAllowance(rightFlat, n.right) + LOOP_ALLOWANCE_IN,
       balanceFromLeftIn: n.pivot,
       tiltDeg: (armTiltRad(n) * 180) / Math.PI,
       leftChildLabel: labels.get(n.left.id) ?? '?',
       rightChildLabel: labels.get(n.right.id) ?? '?',
+      leftFlat,
+      rightFlat,
       loadOz: loads.Wtot,
     })
     const mkDrop = (side: 'left' | 'right', len: number, childId: string) => {
@@ -93,8 +112,8 @@ export function buildPlan(doc: MobileDoc): Plan {
         cutLenIn: len + 2 * LOOP_ALLOWANCE_IN,
       })
     }
-    mkDrop('left', n.dropLeft, n.left.id)
-    mkDrop('right', n.dropRight, n.right.id)
+    if (!leftFlat) mkDrop('left', n.dropLeft, n.left.id)
+    if (!rightFlat) mkDrop('right', n.dropRight, n.right.id)
   })
 
   // hanger wire from ceiling to the top pivot

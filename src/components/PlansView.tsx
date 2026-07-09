@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useStore } from '../state/store'
 import { buildPlan } from '../model/plan'
 import { WIRES, WOODS, fmtIn, fmtOz } from '../model/materials'
-import { SHAPE_LABELS, holePos, svgPath } from '../model/shapes'
+import { SHAPE_LABELS, centroid, holePos, svgPath } from '../model/shapes'
 import { ShapeThumb } from './ShapeThumb'
 
 export function PlansView() {
@@ -83,7 +83,10 @@ export function PlansView() {
                   <td>
                     <strong>{s.label}</strong>
                   </td>
-                  <td>{SHAPE_LABELS[s.node.shape]}</td>
+                  <td>
+                    {SHAPE_LABELS[s.node.shape]}
+                    {s.flat && <em> · lies flat</em>}
+                  </td>
                   <td>
                     {fmtIn(s.node.width)} × {fmtIn(s.node.height)}
                   </td>
@@ -103,7 +106,9 @@ export function PlansView() {
           <p>
             Each <strong>arm</strong> is one piece of wire with a small loop bent at each end (each loop uses about 1¼″ of
             wire) and a hanging loop bent <em>upward</em> at the balance point. Each <strong>drop wire</strong> is a short
-            piece with a loop at each end connecting an arm to whatever hangs below it.
+            piece with a loop at each end connecting an arm to whatever hangs below it. Where a piece{' '}
+            <strong>lies flat</strong>, there's no loop on that end — the wire runs straight on under the piece and is epoxied
+            into a shallow groove on its underside (the cut lengths below already include that extra run).
           </p>
           <h3>Arms</h3>
           <table>
@@ -129,8 +134,14 @@ export function PlansView() {
                     <strong>{fmtIn(a.cutLenIn)}</strong>
                   </td>
                   <td>{fmtIn(a.node.length)}</td>
-                  <td>{a.leftChildLabel}</td>
-                  <td>{a.rightChildLabel}</td>
+                  <td>
+                    {a.leftChildLabel}
+                    {a.leftFlat && <em> (lies flat)</em>}
+                  </td>
+                  <td>
+                    {a.rightChildLabel}
+                    {a.rightFlat && <em> (lies flat)</em>}
+                  </td>
                   <td>
                     <strong>{fmtIn(a.balanceFromLeftIn)}</strong>
                   </td>
@@ -171,16 +182,34 @@ export function PlansView() {
             be very close, but always confirm by test-hanging before you bend.
           </p>
           <ol className="steps">
-            {plan.buildOrder.map((a) => (
-              <li key={a.node.id}>
-                <strong>{a.label}</strong> — cut {WIRES[a.node.wire].label} to{' '}
-                <strong>{fmtIn(a.cutLenIn)}</strong>. Bend a small loop at each end. Hang <strong>{a.leftChildLabel}</strong>{' '}
-                from the left loop on its {fmtIn(a.node.dropLeft)} drop wire, and <strong>{a.rightChildLabel}</strong> from the
-                right loop on its {fmtIn(a.node.dropRight)} drop wire. Mark <strong>{fmtIn(a.balanceFromLeftIn)}</strong> from
-                the left loop, grip the mark with a clamp or clothespin and test-hang. Nudge the grip until the arm floats
-                level, then bend the hanging loop <em>upward</em> at that exact spot.
-              </li>
-            ))}
+            {plan.buildOrder.map((a) => {
+              const sideText = (side: 'left' | 'right') => {
+                const flat = side === 'left' ? a.leftFlat : a.rightFlat
+                const label = side === 'left' ? a.leftChildLabel : a.rightChildLabel
+                const drop = side === 'left' ? a.node.dropLeft : a.node.dropRight
+                return flat ? (
+                  <>
+                    let the {side} end run straight on under <strong>{label}</strong> and epoxy it into the groove on the
+                    piece's underside (no loop on this end)
+                  </>
+                ) : (
+                  <>
+                    bend a small loop on the {side} end and hang <strong>{label}</strong> from it on its {fmtIn(drop)} drop
+                    wire
+                  </>
+                )
+              }
+              return (
+                <li key={a.node.id}>
+                  <strong>{a.label}</strong> — cut {WIRES[a.node.wire].label} to <strong>{fmtIn(a.cutLenIn)}</strong>. Then{' '}
+                  {sideText('left')}; {sideText('right')}. Let any epoxy cure fully. Mark{' '}
+                  <strong>{fmtIn(a.balanceFromLeftIn)}</strong> from{' '}
+                  {a.leftFlat ? 'where the wire comes out from under the left piece' : 'the left loop'},
+                  grip the mark with a clamp or clothespin and test-hang. Nudge the grip until the arm floats level, then bend
+                  the hanging loop <em>upward</em> at that exact spot.
+                </li>
+              )
+            })}
             <li>
               <strong>Hang it up</strong> — cut the ceiling wire to <strong>{fmtIn(plan.drops[0].cutLenIn)}</strong>, loop both
               ends, and hang the whole mobile from your ceiling hook. Give it a gentle push and enjoy. If any arm drifted from
@@ -200,6 +229,7 @@ export function PlansView() {
 
         {plan.shapes.map((s) => {
           const hole = holePos(s.node.shape, s.node.width, s.node.height)
+          const c = centroid(s.node.shape, s.node.width, s.node.height)
           const pad = 0.75
           const w = s.node.width + pad * 2
           const h = s.node.height + pad * 2
@@ -208,6 +238,7 @@ export function PlansView() {
               <h3>
                 {s.label} — {SHAPE_LABELS[s.node.shape]}, {fmtIn(s.node.width)} × {fmtIn(s.node.height)},{' '}
                 {WOODS[s.node.wood].label} {fmtIn(s.node.thickness)}
+                {s.flat && ' · lies flat'}
               </h3>
               <svg
                 className="template-svg"
@@ -215,10 +246,31 @@ export function PlansView() {
                 viewBox={`${-w / 2} ${-h / 2} ${w} ${h}`}
               >
                 <path d={svgPath(s.node.shape, s.node.width, s.node.height)} fill="none" stroke="#000" strokeWidth={0.02} />
-                {/* drill mark */}
-                <line x1={hole.x - 0.15} y1={-hole.y} x2={hole.x + 0.15} y2={-hole.y} stroke="#000" strokeWidth={0.015} />
-                <line x1={hole.x} y1={-hole.y - 0.15} x2={hole.x} y2={-hole.y + 0.15} stroke="#000" strokeWidth={0.015} />
-                <circle cx={hole.x} cy={-hole.y} r={0.031} fill="none" stroke="#000" strokeWidth={0.01} />
+                {s.flat ? (
+                  // groove line on the UNDERSIDE: from the near (inner) edge in,
+                  // running through the centroid line so the piece sits level
+                  <>
+                    <line
+                      x1={-s.node.width / 2}
+                      y1={-c.y}
+                      x2={-s.node.width / 2 + s.grooveLenIn}
+                      y2={-c.y}
+                      stroke="#000"
+                      strokeWidth={0.03}
+                      strokeDasharray="0.12 0.08"
+                    />
+                    <text x={-s.node.width / 2 + s.grooveLenIn + 0.1} y={-c.y + 0.05} fontSize={0.18} fill="#000">
+                      groove {fmtIn(s.grooveLenIn)} (underside)
+                    </text>
+                  </>
+                ) : (
+                  <>
+                    {/* drill mark */}
+                    <line x1={hole.x - 0.15} y1={-hole.y} x2={hole.x + 0.15} y2={-hole.y} stroke="#000" strokeWidth={0.015} />
+                    <line x1={hole.x} y1={-hole.y - 0.15} x2={hole.x} y2={-hole.y + 0.15} stroke="#000" strokeWidth={0.015} />
+                    <circle cx={hole.x} cy={-hole.y} r={0.031} fill="none" stroke="#000" strokeWidth={0.01} />
+                  </>
+                )}
               </svg>
               <div className="calibration">
                 <svg style={{ width: '1in', height: '1in' }} viewBox="0 0 1 1">
@@ -226,7 +278,14 @@ export function PlansView() {
                 </svg>
                 <span>this box must measure exactly 1″ × 1″</span>
               </div>
-              <p className="hint">+ marks the 1/16″ hanging hole. Drill before cutting the shape free.</p>
+              {s.flat ? (
+                <p className="hint">
+                  The dashed line is a shallow groove on the <strong>underside</strong> — saw or file it just deep enough to
+                  seat the wire, then epoxy the wire in. This piece lies flat; no hole to drill.
+                </p>
+              ) : (
+                <p className="hint">+ marks the 1/16″ hanging hole. Drill before cutting the shape free.</p>
+              )}
             </section>
           )
         })}

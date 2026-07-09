@@ -454,6 +454,11 @@ input[type='range'] {
   background: #fdf1ee;
 }
 
+.mount-toggle {
+  display: flex;
+  gap: 8px;
+}
+
 .swatches {
   display: flex;
   gap: 8px;

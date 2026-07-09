@@ -1,6 +1,6 @@
 import type { ArmNode, MobileDoc, MobileNode, ShapeKind, ShapeNode } from './types'
 import { mapTree, newId } from './types'
-import { armLoads, balanceAll } from './balance'
+import { armLoads, balanceAll, balancedPivot } from './balance'
 import type { FamilyKey } from './templates'
 
 export type GenSize = 'small' | 'medium' | 'large'
@@ -58,23 +58,27 @@ const SIZES: Record<GenSize, GenParams> = {
   large: { shapeTarget: 9, shapeMin: 1.75, shapeMax: 5.5, armBase: 12 },
 }
 
-function makeShape(r: () => number, p: GenParams, opts: { small?: boolean; big?: boolean } = {}): ShapeNode {
+function makeShape(r: () => number, p: GenParams, opts: { small?: boolean; big?: boolean; flat?: boolean } = {}): ShapeNode {
   const kind = pickWeighted(r, SHAPE_WEIGHTS)
   let base = p.shapeMin + r() * (p.shapeMax - p.shapeMin)
   if (opts.small) base = p.shapeMin + r() * 1
   if (opts.big) base = p.shapeMax + 1 + r() * 1.5
-  const stretch = kind === 'petal' ? 1.5 + r() * 0.3 : kind === 'blob' ? 0.75 + r() * 0.15 : 1
+  // an oval the same height as its width is just a circle — keep it oval
+  const stretch =
+    kind === 'petal' ? 1.5 + r() * 0.3 : kind === 'blob' ? 0.75 + r() * 0.15 : kind === 'oval' ? 0.6 + r() * 0.15 : 1
   const w = Math.round(base * 4) / 4
   const h = Math.round(base * stretch * 4) / 4
   return {
     kind: 'shape',
     id: newId(),
     shape: kind,
-    width: kind === 'circle' ? w : w,
+    width: w,
     height: kind === 'circle' ? w : h,
     wood: 'balticBirch',
-    thickness: opts.big ? 0.25 : 0.125,
+    // flat pieces read better (and groove more safely) in thicker stock
+    thickness: opts.big || opts.flat ? 0.25 : 0.125,
     color: pickWeighted(r, COLOR_WEIGHTS),
+    ...(opts.flat ? { mount: 'flat' as const } : {}),
   }
 }
 
@@ -94,12 +98,17 @@ function makeArm(r: () => number, length: number, left: MobileNode, right: Mobil
 }
 
 /** descending chain: one shape per level, the rest of the mobile on the other end */
-function genCascade(r: () => number, p: GenParams, shapes: number): MobileNode {
-  let node: MobileNode = makeArm(r, p.armBase * 0.6, makeShape(r, p, { small: true }), makeShape(r, p, { small: true }))
+function genCascade(r: () => number, p: GenParams, shapes: number, flatChance = 0): MobileNode {
+  let node: MobileNode = makeArm(
+    r,
+    p.armBase * 0.6,
+    makeShape(r, p, { small: true, flat: r() < flatChance }),
+    makeShape(r, p, { small: true, flat: r() < flatChance }),
+  )
   let used = 2
   let len = p.armBase * 0.75
   while (used < shapes) {
-    const s = makeShape(r, p)
+    const s = makeShape(r, p, { flat: r() < flatChance })
     node = r() < 0.5 ? makeArm(r, len, s, node) : makeArm(r, len, node, s)
     used += 1
     len *= 1.25
@@ -108,15 +117,15 @@ function genCascade(r: () => number, p: GenParams, shapes: number): MobileNode {
 }
 
 /** random binary tree, splitting until the shape budget is used */
-function genTree(r: () => number, p: GenParams, shapes: number, len: number): MobileNode {
-  if (shapes <= 1) return makeShape(r, p)
+function genTree(r: () => number, p: GenParams, shapes: number, len: number, flatChance = 0): MobileNode {
+  if (shapes <= 1) return makeShape(r, p, { flat: r() < flatChance })
   const leftCount = Math.max(1, Math.min(shapes - 1, Math.round(shapes * (0.3 + r() * 0.4))))
   const rightCount = shapes - leftCount
   return makeArm(
     r,
     len,
-    genTree(r, p, leftCount, len * (0.5 + r() * 0.15) * (leftCount / shapes) * 2),
-    genTree(r, p, rightCount, len * (0.5 + r() * 0.15) * (rightCount / shapes) * 2),
+    genTree(r, p, leftCount, len * (0.5 + r() * 0.15) * (leftCount / shapes) * 2, flatChance),
+    genTree(r, p, rightCount, len * (0.5 + r() * 0.15) * (rightCount / shapes) * 2, flatChance),
   )
 }
 
@@ -132,6 +141,24 @@ function genConstellation(r: () => number, p: GenParams, shapes: number): Mobile
   const tiny: GenParams = { ...p, shapeMin: 1.25, shapeMax: 2.5 }
   const node = genTree(r, tiny, shapes, p.armBase * 2.2)
   return node
+}
+
+/** A mobile is only buildable if every balance point lands where a loop can
+ *  physically be bent — clear of the ends. Lopsided random arms get stretched
+ *  until their pivot has room (children first, so weights are already final). */
+function repairPivots(root: MobileNode): MobileNode {
+  return mapTree(root, (n) => {
+    if (n.kind !== 'arm') return n
+    let arm = n
+    let p = balancedPivot(arm)
+    let guard = 0
+    while ((p < 0.75 || p > arm.length - 0.75) && arm.length < 30 && guard < 14) {
+      arm = { ...arm, length: Math.round(arm.length * 1.2 * 2) / 2 }
+      p = balancedPivot(arm)
+      guard += 1
+    }
+    return { ...arm, pivot: Math.round(p * 100) / 100 }
+  })
 }
 
 /** heavier wire for the arms that carry real weight */
@@ -151,14 +178,16 @@ export function generateMobile(family: FamilyKey | 'any', size: GenSize, seed?: 
   const s = seed ?? Math.floor(Math.random() * 2 ** 31)
   const r = rng(s)
   const fam: FamilyKey =
-    family === 'any' ? pickWeighted(r, [['cascade', 3], ['tree', 3], ['counterweight', 2], ['constellation', 2]]) : family
+    family === 'any'
+      ? pickWeighted(r, [['cascade', 3], ['tree', 3], ['counterweight', 2], ['constellation', 2], ['floating', 2]])
+      : family
   const p = SIZES[size]
   const shapes = Math.max(2, p.shapeTarget + Math.floor(r() * 3) - 1)
 
   let root: MobileNode
   switch (fam) {
     case 'cascade':
-      root = genCascade(r, p, shapes)
+      root = genCascade(r, p, shapes, 0.12)
       break
     case 'counterweight':
       root = genCounterweight(r, p, shapes)
@@ -166,18 +195,22 @@ export function generateMobile(family: FamilyKey | 'any', size: GenSize, seed?: 
     case 'constellation':
       root = genConstellation(r, p, shapes + 1)
       break
+    case 'floating':
+      root = genCascade(r, p, shapes, 0.85)
+      break
     case 'starter':
       root = genTree(r, p, Math.min(shapes, 3), p.armBase * 1.4)
       break
     case 'tree':
     default:
-      root = genTree(r, p, shapes, p.armBase * 1.9)
+      root = genTree(r, p, shapes, p.armBase * 1.9, 0.12)
       break
   }
 
   const name = `${NAME_A[Math.floor(r() * NAME_A.length)]} ${NAME_B[Math.floor(r() * NAME_B.length)]}`
   let doc: MobileDoc = { version: 1, name, hangerDrop: size === 'large' ? 8 : 6, autoBalance: true, root }
   doc = balanceAll(doc) // weights must be settled before picking wire gauges
-  doc = balanceAll(autoWires(doc)) // heavier wire shifts weight, so balance once more
+  doc = autoWires(doc) // heavier wire shifts weight...
+  doc = { ...doc, root: repairPivots(doc.root) } // ...then rebalance and make every pivot bendable
   return doc
 }
