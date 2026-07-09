@@ -236,3 +236,36 @@ describe('shape geometry', () => {
     expect(errors.some((e) => e.message.includes('balance point'))).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Share links: the URL must round-trip the design exactly
+// ---------------------------------------------------------------------------
+
+describe('share links', async () => {
+  const { decodeDocParam, encodeDocParam, shareParamFromHash } = await import('./share')
+
+  it('round-trips every template byte-for-byte', async () => {
+    for (const t of TEMPLATES) {
+      const doc = t.make()
+      const param = await encodeDocParam(doc)
+      expect(param.length, `${t.title} URL payload`).toBeLessThan(4000)
+      const back = await decodeDocParam(param)
+      expect(back).toEqual(doc)
+    }
+  })
+
+  it('round-trips generated designs', async () => {
+    for (let seed = 1; seed <= 5; seed++) {
+      const doc = generateMobile('any', 'large', seed * 331)
+      const back = await decodeDocParam(await encodeDocParam(doc))
+      expect(back).toEqual(doc)
+    }
+  })
+
+  it('rejects garbage without throwing', async () => {
+    expect(await decodeDocParam('zNOT_REAL_DATA')).toBeNull()
+    expect(await decodeDocParam('x123')).toBeNull()
+    expect(shareParamFromHash('#other=1')).toBeNull()
+    expect(shareParamFromHash('#d=abc')).toBe('abc')
+  })
+})

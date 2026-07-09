@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { isPhoneLayout, useStore } from '../state/store'
 import { MobileApp } from './MobileApp'
+import { ShareButton } from './ShareButton'
 import { Canvas3D } from './Canvas3D'
 import { TreePanel } from './TreePanel'
 import { Inspector } from './Inspector'
@@ -69,6 +70,7 @@ function EditorView() {
         <button className="btn" onClick={saveFile}>
           💾 Save
         </button>
+        <ShareButton />
         <input
           ref={fileInput}
           type="file"

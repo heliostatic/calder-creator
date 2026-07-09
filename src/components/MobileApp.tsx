@@ -6,6 +6,7 @@ import { Inspector } from './Inspector'
 import { PlansView } from './PlansView'
 import { TemplatesModal } from './TemplatesModal'
 import { generateMobile } from '../model/generate'
+import { ShareButton } from './ShareButton'
 
 /** The phone layout: a full-screen viewer with a gentle ever-present breeze,
  *  plus Parts and Plans a tap away. Simple on the surface, everything there. */
@@ -63,6 +64,7 @@ export function MobileApp() {
             <button className="btn" onClick={imagine}>
               🪄 Imagine
             </button>
+            <ShareButton />
           </div>
         </div>
       ) : (
