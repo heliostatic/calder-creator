@@ -54,21 +54,23 @@ interface Store {
   redo: () => void
 }
 
+function rebalance(doc: MobileDoc): MobileDoc {
+  return doc.autoBalance ? balanceAll(doc) : doc
+}
+
 function initialDoc(): MobileDoc {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const doc = JSON.parse(raw) as MobileDoc
-      if (doc && doc.version === 1 && doc.root) return doc
+      // rebalance on load: stored pivots may predate improvements to the
+      // balance math (e.g. loop weights), and auto-balance docs should heal
+      if (doc && doc.version === 1 && doc.root) return rebalance(doc)
     }
   } catch {
     // fall through to template
   }
   return TEMPLATES[1].make() // Classic Cascade — never start with a blank screen
-}
-
-function rebalance(doc: MobileDoc): MobileDoc {
-  return doc.autoBalance ? balanceAll(doc) : doc
 }
 
 export const useStore = create<Store>((set, get) => {
@@ -90,8 +92,11 @@ export const useStore = create<Store>((set, get) => {
     future: [],
 
     setDoc: (doc, recordHistory = true) => {
-      if (recordHistory) commit(doc)
-      else set({ doc })
+      // heal on load: shared links and opened files may carry pivots computed
+      // by an older version of the balance math
+      const healed = rebalance(doc)
+      if (recordHistory) commit(healed)
+      else set({ doc: healed })
     },
 
     updateDoc: (patch) => {
