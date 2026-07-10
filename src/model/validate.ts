@@ -1,7 +1,7 @@
 import type { ArmNode, MobileDoc, MobileNode } from './types'
 import { isFlat, labelNodes, walk } from './types'
 import { THICKNESSES, WIRE_LOAD_LIMIT_OZ, flatGrooveLen } from './materials'
-import { armLoads, armPointLoads, armTiltRad, balancedPivot, computePose, shapeWeightOz, totalHangingWeightOz } from './balance'
+import { armLoads, armTiltRad, balanceResidualOzIn, balancedPivot, computePose, shapeWeightOz, totalHangingWeightOz } from './balance'
 import { holePos, materialClearance } from './shapes'
 import { buildPlan } from './plan'
 import { WIRES } from './materials'
@@ -78,8 +78,7 @@ export function validateBuildable(doc: MobileDoc): BuildIssue[] {
     }
 
     // torque identity: at the computed balance point, moments must cancel
-    const loads = armPointLoads(n)
-    const residual = loads.reduce((s, l) => s + l.W * (p - l.x), 0)
+    const residual = balanceResidualOzIn(n, p)
     if (Math.abs(residual) > 1e-6) err(label, `balance math broke: residual moment ${residual}`)
 
     // with auto-balance on, the stored pivot should actually hang level

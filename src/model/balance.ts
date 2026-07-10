@@ -14,27 +14,76 @@ export function shapeWeightOz(n: Extract<MobileNode, { kind: 'shape' }>): number
   return shapeArea(n.shape, n.width, n.height) * n.thickness * WOODS[n.wood].densityOzIn3
 }
 
+/** One piece of mass rigidly attached to an arm: its wire run, its bent
+ *  loops, and any flat-mounted shapes. THE single source of truth for what
+ *  an arm weighs and where — the balance math and the physics simulation
+ *  both build from this inventory, so they can never disagree. */
+export interface ArmMassPart {
+  W: number
+  /** inches from the left end loop, along the arm (may extend past the ends) */
+  x: number
+  /** above (+) / below (−) the hang line */
+  y: number
+  side: 'left' | 'right' | null
+  /** true for the arm's own pivot loop, which rides AT the pivot */
+  pivotLoop?: boolean
+  /** present when this part is a flat-mounted shape */
+  flatShape?: Extract<MobileNode, { kind: 'shape' }>
+}
+
+export function armMassInventory(arm: ArmNode): ArmMassPart[] {
+  const w = WIRES[arm.wire].ozPerIn
+  const parts: ArmMassPart[] = [
+    { W: w * arm.length, x: arm.length / 2, y: 0, side: null },
+    { W: w * LOOP_ALLOWANCE_IN, x: arm.pivot, y: arm.pivotHeight, side: null, pivotLoop: true },
+  ]
+  for (const side of ['left', 'right'] as const) {
+    const child = side === 'left' ? arm.left : arm.right
+    const drop = side === 'left' ? arm.dropLeft : arm.dropRight
+    const end = side === 'left' ? 0 : arm.length
+    const dir = side === 'left' ? -1 : 1
+    if (isFlat(child) && child.kind === 'shape') {
+      // groove run + tail of arm wire under the piece, then the piece itself,
+      // its near edge at the end, local +x outward, weight at the centroid
+      const groove = flatGrooveLen(child.width) + 0.25
+      const c = centroid(child.shape, child.width, child.height)
+      parts.push({ W: w * groove, x: end + (dir * groove) / 2, y: 0, side })
+      parts.push({
+        W: shapeWeightOz(child),
+        x: end + dir * (child.width / 2 + c.x),
+        y: 0.12 + child.thickness / 2,
+        side,
+        flatShape: child,
+      })
+    } else {
+      // arm end loop + drop wire with its two loops, all hanging at the end
+      parts.push({ W: w * (drop + 3 * LOOP_ALLOWANCE_IN), x: end, y: -drop / 2, side })
+    }
+  }
+  return parts
+}
+
 /** Weight of an entire subtree including its wire — every inch of it, loops
  *  included, so the number matches what the shop scale would say.
  *  (What the wire above this node has to carry.) */
 export function subtreeWeightOz(node: MobileNode): number {
   if (node.kind === 'shape') return shapeWeightOz(node)
-  const w = WIRES[node.wire].ozPerIn
-  // the arm's straight run plus its bent pivot loop
-  return w * (node.length + LOOP_ALLOWANCE_IN) + sideWeightOz(node, 'left') + sideWeightOz(node, 'right')
+  let sum = armMassInventory(node).reduce((s, p) => s + p.W, 0)
+  for (const side of ['left', 'right'] as const) {
+    const child = side === 'left' ? node.left : node.right
+    if (!isFlat(child)) sum += subtreeWeightOz(child)
+  }
+  return sum
 }
 
-/** Everything carried past one end of an arm. Hanging: the arm's end loop,
- *  the drop wire with its two loops, and the child subtree. Flat: the piece
- *  plus the groove run and tail of arm wire under it. */
+/** Everything carried past one end of an arm. */
 function sideWeightOz(arm: ArmNode, side: 'left' | 'right'): number {
   const child = side === 'left' ? arm.left : arm.right
-  const drop = side === 'left' ? arm.dropLeft : arm.dropRight
-  const w = WIRES[arm.wire].ozPerIn
-  if (isFlat(child) && child.kind === 'shape') {
-    return shapeWeightOz(child) + w * (flatGrooveLen(child.width) + 0.25)
-  }
-  return w * (drop + 3 * LOOP_ALLOWANCE_IN) + subtreeWeightOz(child)
+  let sum = armMassInventory(arm)
+    .filter((p) => p.side === side)
+    .reduce((s, p) => s + p.W, 0)
+  if (!isFlat(child)) sum += subtreeWeightOz(child)
+  return sum
 }
 
 /** Everything a ceiling hook carries: the mobile plus its hanger wire. */
@@ -50,30 +99,21 @@ export interface ArmPointLoad {
   x: number
 }
 
-/** All the loads an arm carries, as (weight, position) pairs.
- *  (The arm's own pivot loop is excluded: it sits at the pivot, so it adds
- *  weight but never moment — subtreeWeightOz counts it.) */
+/** All the loads an arm carries, as (weight, position) pairs: its own mass
+ *  inventory plus the subtrees hanging from its ends. */
 export function armPointLoads(arm: ArmNode): ArmPointLoad[] {
-  const w = WIRES[arm.wire].ozPerIn
-  const loads: ArmPointLoad[] = [{ W: w * arm.length, x: arm.length / 2 }]
+  return pointLoads(arm, true)
+}
+
+function pointLoads(arm: ArmNode, includePivotLoop: boolean): ArmPointLoad[] {
+  const loads: ArmPointLoad[] = []
+  for (const p of armMassInventory(arm)) {
+    if (p.pivotLoop && !includePivotLoop) continue
+    loads.push({ W: p.W, x: p.x })
+  }
   for (const side of ['left', 'right'] as const) {
     const child = side === 'left' ? arm.left : arm.right
-    const drop = side === 'left' ? arm.dropLeft : arm.dropRight
-    const end = side === 'left' ? 0 : arm.length
-    const dir = side === 'left' ? -1 : 1
-    if (isFlat(child) && child.kind === 'shape') {
-      // the piece lies flat just past the end: its near edge at the end loop
-      // position, its local +x pointing outward, so its weight acts at
-      // end + (half width + centroid offset) along the outward direction
-      const c = centroid(child.shape, child.width, child.height)
-      const groove = flatGrooveLen(child.width) + 0.25 // groove run + tail
-      loads.push({ W: shapeWeightOz(child), x: end + dir * (child.width / 2 + c.x) })
-      loads.push({ W: w * groove, x: end + (dir * groove) / 2 })
-    } else {
-      // arm end loop + drop wire with its two loops + the subtree, all
-      // hanging effectively at the end
-      loads.push({ W: w * (drop + 3 * LOOP_ALLOWANCE_IN) + subtreeWeightOz(child), x: end })
-    }
+    if (!isFlat(child)) loads.push({ W: subtreeWeightOz(child), x: side === 'left' ? 0 : arm.length })
   }
   return loads
 }
@@ -95,12 +135,20 @@ export function armLoads(arm: ArmNode): ArmLoads {
 }
 
 /** Pivot position (inches from the left end loop) that makes the arm hang
- *  level: the weighted centroid of all its point loads. */
+ *  level: the weighted centroid of all its point loads. The pivot loop
+ *  itself is excluded — it rides at the pivot wherever that lands, so it
+ *  cancels out of both sides of the equation. */
 export function balancedPivot(arm: ArmNode): number {
-  const loads = armPointLoads(arm)
+  const loads = pointLoads(arm, false)
   const Wtot = loads.reduce((s, l) => s + l.W, 0)
   if (Wtot <= 0) return arm.length / 2
   return loads.reduce((s, l) => s + l.W * l.x, 0) / Wtot
+}
+
+/** Net moment about a candidate pivot (oz·in), pivot loop excluded — zero
+ *  exactly at balancedPivot(). Used by the validator and tests. */
+export function balanceResidualOzIn(arm: ArmNode, pivot: number): number {
+  return pointLoads(arm, false).reduce((s, l) => s + l.W * (pivot - l.x), 0)
 }
 
 /** Equilibrium tilt of the arm, radians. Positive = left end hangs lower.

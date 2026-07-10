@@ -5,7 +5,7 @@ import { TEMPLATES, blankDoc } from './templates'
 import type { FamilyKey } from './templates'
 import { generateMobile } from './generate'
 import type { GenSize } from './generate'
-import { armPointLoads, balanceAll, balancedPivot, shapeWeightOz, subtreeWeightOz, totalHangingWeightOz } from './balance'
+import { armPointLoads, balanceAll, balanceResidualOzIn, balancedPivot, shapeWeightOz, subtreeWeightOz, totalHangingWeightOz } from './balance'
 import { buildPlan } from './plan'
 import { WIRES, flatGrooveLen } from './materials'
 import { centroid, holePos, materialClearance, outline } from './shapes'
@@ -131,8 +131,7 @@ describe('balance math', () => {
       walk(doc.root, (n) => {
         if (n.kind !== 'arm') return
         const p = balancedPivot(n)
-        const residual = armPointLoads(n).reduce((s, l) => s + l.W * (p - l.x), 0)
-        expect(Math.abs(residual)).toBeLessThan(1e-9)
+        expect(Math.abs(balanceResidualOzIn(n, p))).toBeLessThan(1e-9)
       })
     }
   })

@@ -4,7 +4,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import * as CANNON from 'cannon-es'
 import type { ArmNode, MobileDoc, MobileNode, ShapeNode } from '../model/types'
 import { isArm, isFlat } from '../model/types'
-import { computePose, shapeWeightOz } from '../model/balance'
+import { armMassInventory, computePose, shapeWeightOz } from '../model/balance'
 import type { Pose } from '../model/balance'
 import { WIRES, flatGrooveLen } from '../model/materials'
 import { centroid, holePos, outline, shapeArea } from '../model/shapes'
@@ -310,7 +310,8 @@ export class SceneManager {
     this.hangerGroup = group
 
     if (this.world && this.anchor) {
-      const body = new CANNON.Body({ mass: Math.max(WIRES[wireKey].ozPerIn * drop, 0.05) })
+      // hanger cut = drop + two loops, same as the plan's cut list
+      const body = new CANNON.Body({ mass: Math.max(WIRES[wireKey].ozPerIn * (drop + 2.5), 0.05) })
       body.addShape(new CANNON.Box(new CANNON.Vec3(0.05, drop / 2, 0.05)))
       body.linearDamping = 0.15
       body.angularDamping = 0.3
@@ -402,58 +403,26 @@ export class SceneManager {
     const vis: NodeVisual = { node, group, meshes }
 
     if (this.world) {
-      const ozPerIn = WIRES[node.wire].ozPerIn
-      // gather every rigid mass on this arm (wire, drops, flat pieces) so the
-      // body origin can sit at the true center of mass — otherwise gravity
-      // torques about the pivot come out wrong in the simulation
-      interface Part {
-        mass: number
-        pos: CANNON.Vec3 // in hang-line-center coordinates
-        half: CANNON.Vec3
-        comPos?: CANNON.Vec3 // where the mass truly acts, if not the box center
-      }
-      const parts: Part[] = [{ mass: ozPerIn * L, pos: new CANNON.Vec3(0, 0, 0), half: new CANNON.Vec3(L / 2, 0.06, 0.06) }]
-      for (const s of [-1, 1] as const) {
-        const side = s === -1 ? 'left' : 'right'
-        const flat = flatSide(side)
-        if (flat) {
-          const groove = flatGrooveLen(flat.width)
-          parts.push({
-            mass: ozPerIn * groove,
-            pos: new CANNON.Vec3(s * (L / 2 + groove / 2), 0, 0),
-            half: new CANNON.Vec3(groove / 2, 0.05, 0.05),
-          })
-          const c = centroid(flat.shape, flat.width, flat.height)
-          const center = new CANNON.Vec3(s * (L / 2 + flat.width / 2), 0.12 + flat.thickness / 2, 0)
-          parts.push({
-            mass: Math.max(shapeWeightOz(flat), 0.05),
-            pos: center,
-            half: new CANNON.Vec3(flat.width / 2, Math.max(flat.thickness / 2, 0.05), flat.height / 2),
-            comPos: new CANNON.Vec3(center.x + s * c.x, center.y, center.z),
-          })
-        } else {
-          const drop = s === -1 ? node.dropLeft : node.dropRight
-          parts.push({
-            mass: ozPerIn * drop,
-            pos: new CANNON.Vec3((s * L) / 2, -drop / 2, 0),
-            half: new CANNON.Vec3(0.05, drop / 2, 0.05),
-          })
-        }
-      }
+      // the SAME mass inventory the balance math uses — the simulation and
+      // the printed balance marks can never disagree about what an arm weighs
+      const inventory = armMassInventory(node)
       const massTotal = Math.max(
-        parts.reduce((sum, p) => sum + p.mass, 0),
+        inventory.reduce((sum, p) => sum + p.W, 0),
         0.12,
       )
       const com = new CANNON.Vec3(0, 0, 0)
-      for (const p of parts) {
-        const at = p.comPos ?? p.pos
-        com.x += (at.x * p.mass) / massTotal
-        com.y += (at.y * p.mass) / massTotal
-        com.z += (at.z * p.mass) / massTotal
+      for (const p of inventory) {
+        com.x += ((p.x - L / 2) * p.W) / massTotal
+        com.y += (p.y * p.W) / massTotal
       }
       const body = new CANNON.Body({ mass: massTotal })
-      for (const p of parts) {
-        body.addShape(new CANNON.Box(p.half), p.pos.vsub(com))
+      for (const p of inventory) {
+        const half = p.flatShape
+          ? new CANNON.Vec3(p.flatShape.width / 2, Math.max(p.flatShape.thickness / 2, 0.05), p.flatShape.height / 2)
+          : p.side === null && !p.pivotLoop
+            ? new CANNON.Vec3(L / 2, 0.06, 0.06) // the straight run
+            : new CANNON.Vec3(0.15, 0.15, 0.15) // loops, drops, groove runs
+        body.addShape(new CANNON.Box(half), new CANNON.Vec3(p.x - L / 2 - com.x, p.y - com.y, 0))
       }
       body.linearDamping = 0.15
       body.angularDamping = 0.25
