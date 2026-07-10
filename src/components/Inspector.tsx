@@ -2,7 +2,7 @@ import type { ArmNode, ShapeKind, ShapeNode, WireKey, WoodKey } from '../model/t
 import { findNode, isFlat, labelNodes, walk } from '../model/types'
 import { useStore } from '../state/store'
 import { COLORS, THICKNESSES, WIRES, WOODS, fmtIn, fmtOz } from '../model/materials'
-import { armLoads, armTiltRad, balancedPivot, shapeWeightOz, subtreeWeightOz } from '../model/balance'
+import { armLoads, armTiltRad, balancedPivot, shapeWeightOz, totalHangingWeightOz } from '../model/balance'
 import { SHAPE_LABELS } from '../model/shapes'
 import { ShapeThumb } from './ShapeThumb'
 
@@ -59,7 +59,7 @@ function MobileSettings() {
   const balanceNow = useStore((s) => s.balanceNow)
   const setAllShapes = useStore((s) => s.setAllShapes)
   const setAllWire = useStore((s) => s.setAllWire)
-  const totalOz = subtreeWeightOz(doc.root)
+  const totalOz = totalHangingWeightOz(doc)
 
   // shared values across parts, or '' when they differ
   const woods = new Set<string>()

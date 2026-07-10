@@ -1,7 +1,7 @@
 import type { ArmNode, MobileDoc, ShapeNode } from './types'
 import { isArm, isFlat, labelNodes, walk } from './types'
 import { LOOP_ALLOWANCE_IN, WIRES, WOODS, flatGrooveLen } from './materials'
-import { armLoads, armTiltRad, computePose, shapeWeightOz, subtreeWeightOz } from './balance'
+import { armLoads, armTiltRad, computePose, shapeWeightOz, totalHangingWeightOz } from './balance'
 
 export interface PlanShape {
   node: ShapeNode
@@ -154,7 +154,7 @@ export function buildPlan(doc: MobileDoc): Plan {
     drops,
     buildOrder,
     totals: {
-      weightOz: subtreeWeightOz(doc.root),
+      weightOz: totalHangingWeightOz(doc),
       widthIn: Math.max(pose.max.x - pose.min.x, pose.max.z - pose.min.z),
       heightIn: pose.max.y - pose.min.y + doc.hangerDrop,
       wireTotalsByKind: [...wireTotals.entries()].map(([k, totalIn]) => ({

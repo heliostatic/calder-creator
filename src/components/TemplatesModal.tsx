@@ -5,7 +5,7 @@ import { FAMILIES, TEMPLATES, blankDoc } from '../model/templates'
 import type { FamilyKey } from '../model/templates'
 import { generateMobile } from '../model/generate'
 import type { GenSize } from '../model/generate'
-import { computePose, subtreeWeightOz } from '../model/balance'
+import { computePose, totalHangingWeightOz } from '../model/balance'
 import { fmtOz } from '../model/materials'
 import { useStore } from '../state/store'
 import { MobileThumb } from './MobileThumb'
@@ -28,7 +28,7 @@ function statsFor(doc: MobileDoc): CardStats {
   const pose = computePose(doc)
   const widthIn = Math.max(pose.max.x - pose.min.x, pose.max.z - pose.min.z)
   const difficulty = arms <= 2 ? 'easy afternoon' : arms <= 4 ? 'full afternoon' : arms <= 6 ? 'weekend' : 'ambitious weekend'
-  return { shapes, arms, widthIn, weightOz: subtreeWeightOz(doc.root), difficulty }
+  return { shapes, arms, widthIn, weightOz: totalHangingWeightOz(doc), difficulty }
 }
 
 function Card({ doc, title, blurb, onPick }: { doc: MobileDoc; title: string; blurb: string; onPick: () => void }) {

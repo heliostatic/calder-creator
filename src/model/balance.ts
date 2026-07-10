@@ -1,6 +1,6 @@
 import type { ArmNode, MobileDoc, MobileNode } from './types'
 import { isFlat, mapTree } from './types'
-import { WIRES, WOODS, flatGrooveLen } from './materials'
+import { LOOP_ALLOWANCE_IN, WIRES, WOODS, flatGrooveLen } from './materials'
 import { centroid, holePos, shapeArea } from './shapes'
 
 export interface V3 {
@@ -14,24 +14,33 @@ export function shapeWeightOz(n: Extract<MobileNode, { kind: 'shape' }>): number
   return shapeArea(n.shape, n.width, n.height) * n.thickness * WOODS[n.wood].densityOzIn3
 }
 
-/** Weight of an entire subtree including its wire, ounces.
+/** Weight of an entire subtree including its wire — every inch of it, loops
+ *  included, so the number matches what the shop scale would say.
  *  (What the wire above this node has to carry.) */
 export function subtreeWeightOz(node: MobileNode): number {
   if (node.kind === 'shape') return shapeWeightOz(node)
   const w = WIRES[node.wire].ozPerIn
-  return w * node.length + sideWeightOz(node, 'left') + sideWeightOz(node, 'right')
+  // the arm's straight run plus its bent pivot loop
+  return w * (node.length + LOOP_ALLOWANCE_IN) + sideWeightOz(node, 'left') + sideWeightOz(node, 'right')
 }
 
-/** Everything carried past one end of an arm: the child subtree plus the
- *  drop wire (hanging) or the groove extension of the arm wire (flat). */
+/** Everything carried past one end of an arm. Hanging: the arm's end loop,
+ *  the drop wire with its two loops, and the child subtree. Flat: the piece
+ *  plus the groove run and tail of arm wire under it. */
 function sideWeightOz(arm: ArmNode, side: 'left' | 'right'): number {
   const child = side === 'left' ? arm.left : arm.right
   const drop = side === 'left' ? arm.dropLeft : arm.dropRight
   const w = WIRES[arm.wire].ozPerIn
   if (isFlat(child) && child.kind === 'shape') {
-    return shapeWeightOz(child) + w * flatGrooveLen(child.width)
+    return shapeWeightOz(child) + w * (flatGrooveLen(child.width) + 0.25)
   }
-  return w * drop + subtreeWeightOz(child)
+  return w * (drop + 3 * LOOP_ALLOWANCE_IN) + subtreeWeightOz(child)
+}
+
+/** Everything a ceiling hook carries: the mobile plus its hanger wire. */
+export function totalHangingWeightOz(doc: MobileDoc): number {
+  const rootWire = doc.root.kind === 'arm' ? doc.root.wire : 'steel16'
+  return subtreeWeightOz(doc.root) + WIRES[rootWire].ozPerIn * (doc.hangerDrop + 2 * LOOP_ALLOWANCE_IN)
 }
 
 /** A weight and where it acts along the arm (inches from the left end loop —
@@ -41,7 +50,9 @@ export interface ArmPointLoad {
   x: number
 }
 
-/** All the loads an arm carries, as (weight, position) pairs. */
+/** All the loads an arm carries, as (weight, position) pairs.
+ *  (The arm's own pivot loop is excluded: it sits at the pivot, so it adds
+ *  weight but never moment — subtreeWeightOz counts it.) */
 export function armPointLoads(arm: ArmNode): ArmPointLoad[] {
   const w = WIRES[arm.wire].ozPerIn
   const loads: ArmPointLoad[] = [{ W: w * arm.length, x: arm.length / 2 }]
@@ -55,11 +66,13 @@ export function armPointLoads(arm: ArmNode): ArmPointLoad[] {
       // position, its local +x pointing outward, so its weight acts at
       // end + (half width + centroid offset) along the outward direction
       const c = centroid(child.shape, child.width, child.height)
-      const groove = flatGrooveLen(child.width)
+      const groove = flatGrooveLen(child.width) + 0.25 // groove run + tail
       loads.push({ W: shapeWeightOz(child), x: end + dir * (child.width / 2 + c.x) })
       loads.push({ W: w * groove, x: end + (dir * groove) / 2 })
     } else {
-      loads.push({ W: w * drop + subtreeWeightOz(child), x: end })
+      // arm end loop + drop wire with its two loops + the subtree, all
+      // hanging effectively at the end
+      loads.push({ W: w * (drop + 3 * LOOP_ALLOWANCE_IN) + subtreeWeightOz(child), x: end })
     }
   }
   return loads

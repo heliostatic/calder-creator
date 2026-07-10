@@ -5,7 +5,8 @@ import { TEMPLATES, blankDoc } from './templates'
 import type { FamilyKey } from './templates'
 import { generateMobile } from './generate'
 import type { GenSize } from './generate'
-import { armPointLoads, balanceAll, balancedPivot, shapeWeightOz, subtreeWeightOz } from './balance'
+import { armPointLoads, balanceAll, balancedPivot, shapeWeightOz, subtreeWeightOz, totalHangingWeightOz } from './balance'
+import { buildPlan } from './plan'
 import { WIRES, flatGrooveLen } from './materials'
 import { centroid, holePos, materialClearance, outline } from './shapes'
 import { errorsOf, validateBuildable } from './validate'
@@ -99,8 +100,9 @@ describe('balance math', () => {
     const small = mkShape({ width: 3, height: 3 })
     const arm = mkArm(big, small)
     const w = WIRES.steel16.ozPerIn
-    const WL = shapeWeightOz(big) + w * 2
-    const WR = shapeWeightOz(small) + w * 2
+    // each hanging side: drop wire + its two loops + the arm's end loop
+    const WL = shapeWeightOz(big) + w * (2 + 3 * 1.25)
+    const WR = shapeWeightOz(small) + w * (2 + 3 * 1.25)
     const Warm = w * 10
     const expected = (WR * 10 + Warm * 5) / (WL + WR + Warm)
     expect(balancedPivot(arm)).toBeCloseTo(expected, 8)
@@ -135,7 +137,7 @@ describe('balance math', () => {
     }
   })
 
-  it('subtree weight equals the sum of its parts', () => {
+  it('subtree weight counts every inch of wire, loops included', () => {
     const doc = TEMPLATES.find((t) => t.key === 'waterGarden')!.make()
     let sum = 0
     walk(doc.root, (n) => {
@@ -143,17 +145,31 @@ describe('balance math', () => {
         sum += shapeWeightOz(n)
       } else {
         const w = WIRES[n.wire].ozPerIn
-        sum += w * n.length
-        // drop wires only exist on hanging sides; flat sides add groove wire
+        sum += w * (n.length + 1.25) // straight run + pivot loop
         for (const side of ['left', 'right'] as const) {
           const child = side === 'left' ? n.left : n.right
           const drop = side === 'left' ? n.dropLeft : n.dropRight
-          if (child.kind === 'shape' && child.mount === 'flat') sum += w * flatGrooveLen(child.width)
-          else sum += w * drop
+          if (child.kind === 'shape' && child.mount === 'flat') {
+            sum += w * (flatGrooveLen(child.width) + 0.25) // groove run + tail
+          } else {
+            sum += w * (drop + 3 * 1.25) // drop + its 2 loops + the arm's end loop
+          }
         }
       }
     })
     expect(subtreeWeightOz(doc.root)).toBeCloseTo(sum, 8)
+  })
+
+  it('displayed weight equals shapes plus the entire wire cut list', () => {
+    for (const t of TEMPLATES) {
+      const doc = t.make()
+      const plan = buildPlan(doc)
+      const wireOz =
+        plan.arms.reduce((s, a) => s + a.cutLenIn * WIRES[a.node.wire].ozPerIn, 0) +
+        plan.drops.reduce((s, d) => s + d.cutLenIn * WIRES[d.wireKey as keyof typeof WIRES].ozPerIn, 0)
+      const shapesOz = plan.shapes.reduce((s, x) => s + x.weightOz, 0)
+      expect(totalHangingWeightOz(doc), t.title).toBeCloseTo(wireOz + shapesOz, 8)
+    }
   })
 })
 

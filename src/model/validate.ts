@@ -1,9 +1,14 @@
 import type { ArmNode, MobileDoc, MobileNode } from './types'
 import { isFlat, labelNodes, walk } from './types'
 import { THICKNESSES, WIRE_LOAD_LIMIT_OZ, flatGrooveLen } from './materials'
-import { armLoads, armPointLoads, armTiltRad, balancedPivot, computePose, shapeWeightOz, subtreeWeightOz } from './balance'
+import { armLoads, armPointLoads, armTiltRad, balancedPivot, computePose, shapeWeightOz, totalHangingWeightOz } from './balance'
 import { holePos, materialClearance } from './shapes'
 import { buildPlan } from './plan'
+import { WIRES } from './materials'
+
+function WIRE_OZ_PER_IN(key: string): number {
+  return WIRES[key as keyof typeof WIRES].ozPerIn
+}
 
 /** One problem found in a design. `error` means "this can't be built as
  *  drawn"; `warning` means "buildable, but your dad will curse at it". */
@@ -89,15 +94,24 @@ export function validateBuildable(doc: MobileDoc): BuildIssue[] {
     if (carried > limit) warn(label, `${carried.toFixed(1)} oz on wire rated ~${limit} oz — step up a gauge`)
   })
 
-  // the plan and the physics must agree on total weight (plan counts cut
-  // pieces; balance counts hanging masses — they measure the same mobile)
-  const totalOz = subtreeWeightOz(doc.root)
+  // the plan and the physics must agree on total weight EXACTLY: every inch
+  // of wire on the cut list plus every shape must equal the displayed weight
+  const totalOz = totalHangingWeightOz(doc)
   if (!isFinite(totalOz) || totalOz <= 0) err('mobile', 'total weight is not a positive number')
   const plan = buildPlan(doc)
   const planShapesOz = plan.shapes.reduce((s, x) => s + x.weightOz, 0)
+  const planWireOz =
+    plan.arms.reduce((s, a) => s + a.cutLenIn * WIRE_OZ_PER_IN(a.node.wire), 0) +
+    plan.drops.reduce((s, d) => s + d.cutLenIn * WIRE_OZ_PER_IN(d.wireKey), 0)
+  if (Math.abs(planShapesOz + planWireOz - totalOz) > 1e-6) {
+    err(
+      'plans',
+      `cut list weight (${(planShapesOz + planWireOz).toFixed(3)} oz) disagrees with displayed weight (${totalOz.toFixed(3)} oz)`,
+    )
+  }
   const shapesOz = collectShapesOz(doc.root)
   if (Math.abs(planShapesOz - shapesOz) > 0.01) {
-    err('plans', `cut list weight (${planShapesOz.toFixed(2)} oz) disagrees with model weight (${shapesOz.toFixed(2)} oz)`)
+    err('plans', `cut list shapes (${planShapesOz.toFixed(2)} oz) disagree with model shapes (${shapesOz.toFixed(2)} oz)`)
   }
   for (const a of plan.arms) {
     if (a.cutLenIn < a.node.length) err(a.label, 'cut length shorter than the finished arm')
